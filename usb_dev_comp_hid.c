@@ -42,6 +42,9 @@
 #include "events.h"
 #include "motion.h"
 
+#include "utils/uartstdio.h"
+
+
 //*****************************************************************************
 //
 // Global array that contains the colors of the RGB.  USB is assigned BLUE.
@@ -127,6 +130,7 @@ uint32_t
 MouseHandler(void *pvCBData, uint32_t ui32Event,
              uint32_t ui32MsgData, void *pvMsgData)
 {
+	UARTprintf("\033[2JMOUSE %d\n", ui32Event);
     switch(ui32Event)
     {
         //
@@ -297,269 +301,8 @@ MouseMoveHandler(void)
     }
 }
 
-//*****************************************************************************
-//
-// Handles asynchronous events from the HID keyboard driver.
-//
-// \param pvCBData is the event callback pointer provided during
-// USBDHIDKeyboardInit().  This is a pointer to our keyboard device structure
-// (&g_sKeyboardDevice).
-// \param ui32Event identifies the event we are being called back for.
-// \param ui32MsgData is an event-specific value.
-// \param pvMsgData is an event-specific pointer.
-//
-// This function is called by the HID keyboard driver to inform the application
-// of particular asynchronous events related to operation of the keyboard HID
-// device.
-//
-// \return Returns 0 in all cases.
-//
-//*****************************************************************************
-uint32_t
-KeyboardHandler(void *pvCBData, uint32_t ui32Event, uint32_t ui32MsgData,
-                void *pvMsgData)
-{
-    switch (ui32Event)
-    {
-        //
-        // The host has connected to us and configured the device.
-        //
-        case USB_EVENT_CONNECTED:
-        {
-            HWREGBITW(&g_ui32USBFlags, FLAG_CONNECTED) = 1;
-            HWREGBITW(&g_ui32USBFlags, FLAG_SUSPENDED) = 0;
-            g_eKeyboardState = KEYBOARD_STATE_IDLE;
 
-            //
-            // Turn on the LED to show we are connected to USB
-            //
-            g_pui32RGBColors[BLUE] = 0x2000;
-            RGBColorSet(g_pui32RGBColors);
-            break;
-        }
 
-        //
-        // The host has disconnected from us.
-        //
-        case USB_EVENT_DISCONNECTED:
-        {
-            HWREGBITW(&g_ui32USBFlags, FLAG_CONNECTED) = 0;
-            g_eKeyboardState = KEYBOARD_STATE_UNCONFIGURED;
-
-            //
-            // Turn off the LED to show we no longer connected to USB.
-            //
-            g_pui32RGBColors[BLUE] = 0;
-            RGBColorSet(g_pui32RGBColors);
-            break;
-        }
-
-        //
-        // We receive this event every time the host acknowledges transmission
-        // of a report. It is used here purely as a way of determining whether
-        // the host is still talking to us or not.
-        //
-        case USB_EVENT_TX_COMPLETE:
-        {
-            //
-            // Enter the idle state since we finished sending something.
-            //
-            g_eKeyboardState = KEYBOARD_STATE_IDLE;
-            break;
-        }
-
-        //
-        // This event indicates that the host has suspended the USB bus.
-        //
-        case USB_EVENT_SUSPEND:
-        {
-            HWREGBITW(&g_ui32USBFlags, FLAG_SUSPENDED) = 1;
-            break;
-        }
-
-        //
-        // This event signals that the host has resumed signaling on the bus.
-        //
-        case USB_EVENT_RESUME:
-        {
-            HWREGBITW(&g_ui32USBFlags, FLAG_SUSPENDED) = 0;
-            break;
-        }
-
-        //
-        // This event indicates that the host has sent us an Output or
-        // Feature report and that the report is now in the buffer we provided
-        // on the previous USBD_HID_EVENT_GET_REPORT_BUFFER callback.
-        //
-        case USBD_HID_KEYB_EVENT_SET_LEDS:
-        {
-            break;
-        }
-
-        //
-        // We ignore all other events.
-        //
-        default:
-        {
-            break;
-        }
-    }
-
-    return(0);
-}
-
-//***************************************************************************
-//
-// Wait for a period of time for the state to become idle.
-//
-// \param ui32TimeoutTick is the number of system ticks to wait before
-// declaring a timeout and returning \b false.
-//
-// This function polls the current keyboard state for ui32TimeoutTicks system
-// ticks waiting for it to become idle.  If the state becomes idle, the
-// function returns true.  If it ui32TimeoutTicks occur prior to the state
-// becoming idle, false is returned to indicate a timeout.
-//
-// \return Returns \b true on success or \b false on timeout.
-//
-//***************************************************************************
-bool
-KeyboardWaitForSendIdle(uint_fast32_t ui32TimeoutTicks)
-{
-    uint32_t ui32Start;
-    uint32_t ui32Now;
-    uint32_t ui32Elapsed;
-
-    ui32Start = g_ui32SysTickCount;
-    ui32Elapsed = 0;
-
-    while(ui32Elapsed < ui32TimeoutTicks)
-    {
-        //
-        // Is the keyboard is idle, return immediately.
-        //
-        if(g_eKeyboardState == KEYBOARD_STATE_IDLE)
-        {
-            return(true);
-        }
-
-        //
-        // Determine how much time has elapsed since we started waiting.  This
-        // should be safe across a wrap of g_ui32SysTickCount.
-        //
-        ui32Now = g_ui32SysTickCount;
-        ui32Elapsed = ((ui32Start < ui32Now) ? (ui32Now - ui32Start) :
-                     (((uint32_t)0xFFFFFFFF - ui32Start) + ui32Now + 1));
-    }
-
-    //
-    // If we get here, we timed out so return a bad return code to let the
-    // caller know.
-    //
-    return(false);
-}
-
-//****************************************************************************
-//
-// This function will send a KeyState change to the USB library and wait for
-// the transmission to complete.
-//
-//****************************************************************************
-uint32_t KeyboardStateChange(uint8_t ui8Modifiers, uint8_t ui8Usage,
-                             bool bPressed)
-{
-    uint32_t ui32RetCode;
-
-    //
-    // Send the Key state change to the
-    //
-    g_eKeyboardState = KEYBOARD_STATE_SENDING;
-    ui32RetCode = USBDHIDKeyboardKeyStateChange((void *)&g_sKeyboardDevice,
-                                                ui8Modifiers, ui8Usage,
-                                                bPressed);
-
-    if(ui32RetCode == KEYB_SUCCESS)
-    {
-        //
-        // Wait until the key press message has been sent.
-        //
-        if(!KeyboardWaitForSendIdle(MAX_SEND_DELAY))
-        {
-            HWREGBITW(&g_ui32USBFlags, FLAG_CONNECTED) = 0;
-
-            //
-            // Turn off the LED to show we no longer connected to USB.
-            //
-            g_pui32RGBColors[BLUE] = 0;
-            RGBColorSet(g_pui32RGBColors);
-
-        }
-    }
-
-    return (ui32RetCode);
-}
-
-//****************************************************************************
-//
-// Primary keyboard application function.  This function translates the Gesture
-// states provided by the motion system into keyboard events to emulate certain
-// application functions.
-//
-// A quick lift will simulate an ALT + TAB. While lifted a twist left or right
-// will select amongst the open windows presented in the ALT + TAB dialog. A
-// quick down motion will return to the idle state and ready for mousing.
-//
-// While in the idle state a quick twist about the Z axis will page up or page
-// down the current window depending on direction of rotation.  A sharp
-// horizontal left or right acceleration will send a CTRL + or CTRL - depending
-// on direction.
-//
-// Roll and Pitch while idle move the mouse cursor.  See MouseMoveHandler.
-//
-//****************************************************************************
-void
-KeyboardMain(void)
-{
-    bool bKeyHold, bModifierHold;
-    uint8_t ui8Key, ui8Modifiers;
-
-    //
-    // Check if the keyboard is in the suspended state.
-    //
-    if(HWREGBITW(&g_ui32USBFlags, FLAG_SUSPENDED) == 1)
-    {
-        //
-        // We are connected but keyboard is suspended so do wake request.
-        //
-        USBDHIDKeyboardRemoteWakeupRequest((void *)&g_sKeyboardDevice);
-    }
-    else
-    {
-        if(MotionKeyboardGet(&ui8Modifiers, &ui8Key, &bModifierHold,
-                             &bKeyHold))
-        {
-            //
-            // Send the Keyboard Packet button presses.
-            //
-            if(KeyboardStateChange(ui8Modifiers, ui8Key, true) != KEYB_SUCCESS)
-            {
-                return;
-            }
-
-            //
-            // Release the key and modifier depending on the hold state that
-            // was returned.
-            //
-            ROM_SysCtlDelay(ROM_SysCtlClockGet() / (100 * 3));
-
-            if(KeyboardStateChange(bModifierHold ? ui8Modifiers : 0,
-                                   ui8Key, bKeyHold) != KEYB_SUCCESS)
-            {
-                return;
-            }
-        }
-    }
-}
 
 //****************************************************************************
 //
@@ -571,6 +314,7 @@ uint32_t
 EventHandler(void *pvCBData, uint32_t ui32Event, uint32_t ui32MsgData,
              void *pvMsgData)
 {
+	UARTprintf("\033[2JEVENT %d\n", ui32Event);
     switch(ui32Event)
     {
         //

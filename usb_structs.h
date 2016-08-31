@@ -40,7 +40,7 @@ extern volatile uint_fast8_t g_ui8Buttons;
 // device.
 //
 //****************************************************************************
-#define NUM_DEVICES 2
+#define NUM_DEVICES 1
 
 //*****************************************************************************
 //
@@ -102,6 +102,4 @@ extern uint32_t EventHandler(void *pvCBData, uint32_t ui32Event,
                              uint32_t ui32MsgValue, void *pvMsgData);
 extern uint32_t MouseHandler(void *pvCBData, uint32_t ui32Event,
                              uint32_t ui32MsgData, void *pvMsgData);
-extern uint32_t KeyboardHandler(void *pvCBData, uint32_t ui32Event,
-                                uint32_t ui32MsgData, void *pvMsgData);
 #endif

@@ -107,6 +107,69 @@ const uint8_t * const g_pui8StringDescriptors[] =
 #define NUM_STRING_DESCRIPTORS (sizeof(g_pui8StringDescriptors) /             \
                                 sizeof(uint8_t *))
 
+//*****************************************************************************
+//
+// The report descriptor for the BIOS mouse class device.
+//
+//*****************************************************************************
+static const uint8_t g_pucIMUReportDescriptor[]=
+{
+	//TODO: CHANGE THIS
+	UsagePage(USB_HID_GENERIC_DESKTOP),
+	//Usage(USB_HID_POINTER),
+	Collection(USB_HID_APPLICATION),
+	//Usage(USB_HID_POINTER),
+	//Collection(USB_HID_PHYSICAL),
+
+	//
+	// The IMU Data
+	//
+	UsagePage(USB_HID_GENERIC_DESKTOP),
+	Usage(USB_HID_X),
+	Usage(USB_HID_Y),
+	LogicalMinimum(-127),
+	LogicalMaximum(127),
+	//
+	// 2 - 8 bit Values for x and y.
+	//
+	ReportSize(8),
+	ReportCount(2),
+	Input(USB_HID_INPUT_DATA | USB_HID_INPUT_VARIABLE |
+	USB_HID_INPUT_RELATIVE),
+	EndCollection,
+	//EndCollection,
+};
+
+//*****************************************************************************
+//
+// The HID class descriptor table.
+//
+//*****************************************************************************
+static const uint8_t * const g_pIMUClassDescriptors[] =
+{
+		g_pucIMUReportDescriptor
+};
+//*****************************************************************************
+//
+// The HID descriptor for the mouse device.
+//
+//*****************************************************************************
+static const tHIDDescriptor g_sMouseHIDDescriptor =
+{
+9, // bLength
+USB_HID_DTYPE_HID, // bDescriptorType
+0x111, // bcdHID (version 1.11 compliant)
+0, // bCountryCode (not localized)
+1, // bNumDescriptors
+USB_HID_DTYPE_REPORT, // Report descriptor
+sizeof(g_pucIMUReportDescriptor) // Size of report descriptor
+};
+
+tHIDReportIdle g_psReportIdle[1] =
+{
+{ 0, 1, 0, 0 }, // Report 1 polled every 500mS (4 * 125).
+};
+
 //****************************************************************************
 //
 // The HID mouse device initialization and customization structures.
@@ -143,50 +206,6 @@ tUSBDHIDMouseDevice g_sMouseDevice =
     // Point to the mouse device structure.
     //
     (void *)&g_sMouseDevice,
-
-    //
-    // The composite device does not use the strings from the class.
-    //
-    0,
-    0,
-};
-
-//*****************************************************************************
-//
-// The HID keyboard device initialization and customization structures.
-//
-//*****************************************************************************
-tUSBDHIDKeyboardDevice g_sKeyboardDevice =
-{
-    //
-    // Tiva VID.
-    //
-    USB_VID_TI_1CBE,
-
-    //
-    // Tiva HID Mouse PID.
-    //
-    USB_PID_KEYBOARD,
-
-    //
-    // This is in 2mA increments so 500mA.
-    //
-    250,
-
-    //
-    // Bus powered device.
-    //
-    USB_CONF_ATTR_BUS_PWR,
-
-    //
-    // The Mouse handler function.
-    //
-    KeyboardHandler,
-
-    //
-    // Point to the mouse device structure.
-    //
-    (void *)&g_sKeyboardDevice,
 
     //
     // The composite device does not use the strings from the class.

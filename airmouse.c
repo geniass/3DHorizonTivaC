@@ -38,10 +38,6 @@
 #include "driverlib/uart.h"
 #include "utils/uartstdio.h"
 #include "drivers/rgb.h"
-#include "remoti_uart.h"
-#include "remoti_npi.h"
-#include "remoti_rti.h"
-#include "remoti_rtis.h"
 #include "drivers/buttons.h"
 #include "usblib/usblib.h"
 #include "usblib/usbhid.h"
@@ -53,7 +49,6 @@
 #include "events.h"
 #include "motion.h"
 #include "usb_structs.h"
-#include "lprf.h"
 
 //*****************************************************************************
 //
@@ -266,7 +261,7 @@ main(void)
     // controller and connect the device to the bus.
     //
     USBDHIDMouseCompositeInit(0, &g_sMouseDevice, &g_psCompDevices[0]);
-    USBDHIDKeyboardCompositeInit(0, &g_sKeyboardDevice, &g_psCompDevices[1]);
+    //USBDHIDKeyboardCompositeInit(0, &g_sKeyboardDevice, &g_psCompDevices[1]);
 
     //
     // Set the USB stack mode to Force Device mode.
@@ -292,10 +287,6 @@ main(void)
     //
     MotionInit();
 
-    //
-    // Initialize the Radio Systems.
-    //
-    LPRFInit();
 
     //
     // Drop into the main loop.
@@ -319,27 +310,9 @@ main(void)
             if(HWREGBITW(&g_ui32USBFlags, FLAG_CONNECTED) == 1)
             {
                 MouseMoveHandler();
-                KeyboardMain();
             }
         }
 
-        //
-        // Check for LPRF tick events.  LPRF Ticks are slower since UART to
-        // RNP is much slower data connection than the USB.
-        //
-        if(HWREGBITW(&g_ui32Events, LPRF_TICK_EVENT) == 1)
-        {
-            //
-            // Clear the event flag.
-            //
-            HWREGBITW(&g_ui32Events, LPRF_TICK_EVENT) = 0;
-
-            //
-            // Perform the LPRF Main task handling
-            //
-            LPRFMain();
-
-        }
 
         //
         // Check for and handle motion events.
