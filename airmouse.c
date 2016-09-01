@@ -39,70 +39,13 @@
 #include "utils/uartstdio.h"
 #include "drivers/rgb.h"
 #include "drivers/buttons.h"
-#include "usblib/usblib.h"
-#include "usblib/usbhid.h"
-#include "usblib/device/usbdevice.h"
-#include "usblib/device/usbdcomp.h"
-#include "usblib/device/usbdhid.h"
-#include "usblib/device/usbdhidmouse.h"
-#include "usblib/device/usbdhidkeyb.h"
 #include "events.h"
 #include "motion.h"
-#include "usb_structs.h"
+#include "send_data.h"
 
 //*****************************************************************************
 //
-//! \addtogroup example_list
-//! <h1>Motion Air Mouse (airmouse)</h1>
-//!
-//! This example demonstrates the use of the Sensor Library, TM4C123G LaunchPad
-//! and the SensHub BoosterPack to fuse nine axis sensor measurements into
-//! motion and gesture events.  These events are then transformed into mouse
-//! and keyboard events to perform standard HID tasks.
-//!
-//! Connect the device USB port on the side of the LaunchPad to a standard
-//! computer USB port.  The LaunchPad with SensHub BoosterPack enumerates on
-//! the USB bus as a composite HID keyboard and mouse.
-//!
-//! Hold the LaunchPad with the buttons away from the user and toward the
-//! computer with USB Device cable exiting the right and bottom corner of the
-//! board.
-//!
-//! - Roll or tilt the LaunchPad to move the mouse cursor of the computer
-//! up, down, left and right.
-//!
-//! - The buttons on the LaunchPad perform the left and right mouse click
-//! actions.  The buttons on the SensHub BoosterPack are not currently used by
-//! this example.
-//!
-//! - A quick spin of the LaunchPad generates a PAGE_UP or PAGE_DOWN
-//! keyboard press and release depending on the direction of the spin.  This
-//! motion simulates scrolling.
-//!
-//! - A quick horizontal jerk to the left or right  generates a CTRL+ or
-//! CTRL- keyboard event, which creates the zoom effect used in many
-//! applications, especially web browsers.
-//!
-//! - A quick vertical lift generates an ALT+TAB keyboard event, which
-//! allows the computer user to select between currently open windows.
-//!
-//! - A quick twist to the left or right moves the window selector.
-//!
-//! - A quick jerk in the down direction selects the desired window and
-//! closes the window selection dialog.
-//!
-//! This example also supports the RemoTI low power RF Zigbee&reg;&nbsp;human
-//! interface device profile.  The wireless features of this example require the
-//! CC2533EMK expansion card and the CC2531EMK USB Dongle.  For details and
-//! instructions for wireless operations see the Wiki at
-//! http://processors.wiki.ti.com/index.php/Tiva_C_Series_LaunchPad and
-//! http://processors.wiki.ti.com/index.php/Wireless_Air_Mouse_Guide.
-//
-//*****************************************************************************
-
-//*****************************************************************************
-//
-// Holds command bits used to signal the main loop to perform various tasks.
+// LED colour storage
 //
 //*****************************************************************************
 volatile uint32_t g_pui32RGBColors[3];
@@ -131,16 +74,6 @@ volatile uint_fast32_t g_ui32SysTickCount;
 
 //*****************************************************************************
 //
-// The memory allocated to hold the composite descriptor that is created by
-// the call to USBDCompositeInit().
-//
-//*****************************************************************************
-#define DESCRIPTOR_DATA_SIZE    (COMPOSITE_DHID_SIZE + COMPOSITE_DHID_SIZE)
-uint8_t g_pui8DescriptorData[DESCRIPTOR_DATA_SIZE];
-
-
-//*****************************************************************************
-//
 // The error routine that is called if the driver library encounters an error.
 //
 //*****************************************************************************
@@ -163,7 +96,6 @@ SysTickIntHandler(void)
 {
     g_ui32SysTickCount++;
     HWREGBITW(&g_ui32Events, USB_TICK_EVENT) = 1;
-    HWREGBITW(&g_ui32Events, LPRF_TICK_EVENT) = 1;
     g_ui8Buttons = ButtonsPoll(0, 0);
 }
 
@@ -237,7 +169,7 @@ main(void)
     //
     // Print the welcome message to the terminal.
     //
-    UARTprintf("\033[2JAir Mouse Application\n");
+    UARTprintf("\033[2JIMU Measurement Application\n");
 
     //
     // Configure desired interrupt priorities. This makes certain that the DCM
@@ -249,31 +181,6 @@ main(void)
     ROM_IntPrioritySet(INT_UART1, 0x60);
     ROM_IntPrioritySet(INT_UART0, 0x70);
     ROM_IntPrioritySet(INT_WTIMER5B, 0x80);
-
-    //
-    // Configure the USB D+ and D- pins.
-    //
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
-    ROM_GPIOPinTypeUSBAnalog(GPIO_PORTD_BASE, GPIO_PIN_5 | GPIO_PIN_4);
-
-    //
-    // Pass the USB library our device information, initialize the USB
-    // controller and connect the device to the bus.
-    //
-    USBDHIDMouseCompositeInit(0, &g_sMouseDevice, &g_psCompDevices[0]);
-    //USBDHIDKeyboardCompositeInit(0, &g_sKeyboardDevice, &g_psCompDevices[1]);
-
-    //
-    // Set the USB stack mode to Force Device mode.
-    //
-    USBStackModeSet(0, eUSBModeForceDevice, 0);
-
-    //
-    // Pass the device information to the USB library and place the device
-    // on the bus.
-    //
-    USBDCompositeInit(0, &g_sCompDevice, DESCRIPTOR_DATA_SIZE,
-                      g_pui8DescriptorData);
 
     //
     // User Interface Init
@@ -304,13 +211,7 @@ main(void)
             //
             HWREGBITW(&g_ui32Events, USB_TICK_EVENT) = 0;
 
-            //
-            // Each tick period handle wired mouse and keyboard.
-            //
-            if(HWREGBITW(&g_ui32USBFlags, FLAG_CONNECTED) == 1)
-            {
-                MouseMoveHandler();
-            }
+			sendIMUData();
         }
 
 
