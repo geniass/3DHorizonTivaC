@@ -48,7 +48,7 @@
 //*****************************************************************************
 //
 // Global array that contains the colors of the RGB.  Motion is assigned the
-// RED LED and should only modify RED.
+// GREEN LED and should only modify GREEN.
 //
 // fast steady blink means I2C bus error.  Power cycle to clear.  usually
 // caused by a reset of the system during an I2C transaction causing the slave
@@ -200,7 +200,7 @@ void MotionCallback(void* pvCallbackData, uint_fast8_t ui8Status)
         //
         // Turn on the LED to show we are ready to process motion date
         //
-        g_pui32RGBColors[RED] = 0xFFFF;
+        g_pui32RGBColors[MOTION_LED(g_ui8MotionState)] = 0xFFFF;
         RGBColorSet(g_pui32RGBColors);
 
         if(g_ui8MotionState == MOTION_STATE_RUN);
@@ -490,16 +490,16 @@ MotionMain(void)
                 CompDCMStart(&g_sCompDCMInst);
 
                 //
+				// Turn off the LED to show we are done processing motion data.
+				//
+				g_pui32RGBColors[MOTION_LED(g_ui8MotionState)] = 0;
+				RGBColorSet(g_pui32RGBColors);
+
+                //
                 // Proceed to the run state.
                 //
                 g_ui8MotionState = MOTION_STATE_RUN;
             }
-
-            //
-            // Turn off the LED to show we are done processing motion data.
-            //
-            g_pui32RGBColors[RED] = 0;
-            RGBColorSet(g_pui32RGBColors);
 
             //
             // Finished
@@ -523,7 +523,7 @@ MotionMain(void)
             //
             // Turn off the LED to show we are done processing motion data.
             //
-            g_pui32RGBColors[RED] = 0;
+            g_pui32RGBColors[MOTION_LED(g_ui8MotionState)] = 0;
             RGBColorSet(g_pui32RGBColors);
 
             //
@@ -541,6 +541,7 @@ MotionMain(void)
         //
         case MOTION_STATE_ERROR:
         {
+        	UARTprintf("I2C Error occurred\n");
             //
             // Our tick counter and blink mechanism may not be safe across
             // rollovers of the g_ui32SysTickCount variable.  This rollover

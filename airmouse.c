@@ -202,7 +202,7 @@ main(void)
     {
 
         //
-        // Check for and handle timer tick events.
+        // Send latest state info to host on timer tick
         //
         if(HWREGBITW(&g_ui32Events, USB_TICK_EVENT) == 1)
         {
