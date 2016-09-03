@@ -197,12 +197,6 @@ void MotionCallback(void* pvCallbackData, uint_fast8_t ui8Status)
         //
         HWREGBITW(&g_ui32Events, MOTION_EVENT) = 1;
 
-        //
-        // Turn on the LED to show we are ready to process motion date
-        //
-        g_pui32RGBColors[MOTION_LED(g_ui8MotionState)] = 0xFFFF;
-        RGBColorSet(g_pui32RGBColors);
-
         if(g_ui8MotionState == MOTION_STATE_RUN);
         {
             //
@@ -227,7 +221,7 @@ void MotionCallback(void* pvCallbackData, uint_fast8_t ui8Status)
                                g_pfAccel[2]);
             CompDCMGyroUpdate(&g_sCompDCMInst, -g_pfGyro[0], -g_pfGyro[1],
                               -g_pfGyro[2]);
-            //CompDCMUpdate(&g_sCompDCMInst);
+            CompDCMUpdate(&g_sCompDCMInst);
         }
     }
     else
@@ -343,6 +337,10 @@ MotionI2CWait(char* pcFilename, uint_fast32_t ui32Line)
 void
 MotionInit(void)
 {
+	// Turn on RED LED to indicate init has begun
+	g_pui32RGBColors[RED] = 0xFFFF;
+	RGBColorSet(g_pui32RGBColors);
+
     //
     // Enable port B used for motion interrupt.
     //
@@ -405,8 +403,18 @@ MotionInit(void)
     //
     MotionI2CWait(__FILE__, __LINE__);
 
+    /*
     //
-    // Write application specifice sensor configuration such as filter settings
+	// Configure the sampling rate to 1000 Hz / (1+24) = 40 Hz.
+	//
+	g_sMPU9150Inst.pui8Data[0] = 24;
+	MPU9150Write(&g_sMPU9150Inst, MPU9150_O_SMPLRT_DIV, g_sMPU9150Inst.pui8Data,
+			1, MotionCallback, &g_sMPU9150Inst);
+	MotionI2CWait(__FILE__, __LINE__);
+	*/
+
+    //
+    // Write application specific sensor configuration such as filter settings
     // and sensor range settings.
     //MPU9150_CONFIG_DLPF_CFG_44_42
     // MPU9150_CONFIG_DLPF_CFG_94_98
@@ -442,6 +450,10 @@ MotionInit(void)
     //
     CompDCMInit(&g_sCompDCMInst, 1.0f / ((float) MOTION_SAMPLE_FREQ_HZ),
                 DCM_ACCEL_WEIGHT, DCM_GYRO_WEIGHT, DCM_MAG_WEIGHT);
+
+    // Init is now done
+    g_pui32RGBColors[RED] = 0x0;
+    RGBColorSet(g_pui32RGBColors);
 }
 
 //*****************************************************************************
@@ -513,7 +525,6 @@ MotionMain(void)
         //
         case MOTION_STATE_RUN:
         {
-        	CompDCMUpdate(&g_sCompDCMInst);
             //
             // Get the latest Euler data from the DCM. DCMUpdate is done
             // inside the interrupt routine to insure it is not skipped and
@@ -521,12 +532,6 @@ MotionMain(void)
             //
             CompDCMComputeEulers(&g_sCompDCMInst, g_pfEulers,
                                  g_pfEulers + 1, g_pfEulers + 2);
-
-            //
-            // Turn off the LED to show we are done processing motion data.
-            //
-            g_pui32RGBColors[MOTION_LED(g_ui8MotionState)] = 0;
-            RGBColorSet(g_pui32RGBColors);
 
             //
             // Finished

@@ -71,6 +71,7 @@ volatile uint_fast8_t g_ui8Buttons;
 //
 //*****************************************************************************
 volatile uint_fast32_t g_ui32SysTickCount;
+volatile uint_fast32_t g_ui32PrevSysTickCount;
 
 //*****************************************************************************
 //
@@ -97,6 +98,18 @@ SysTickIntHandler(void)
     g_ui32SysTickCount++;
     HWREGBITW(&g_ui32Events, USB_TICK_EVENT) = 1;
     g_ui8Buttons = ButtonsPoll(0, 0);
+
+	if ((g_ui32SysTickCount - g_ui32PrevSysTickCount)
+			> SYSTICKS_PER_SECOND / 2.f) {
+		g_ui32PrevSysTickCount = g_ui32SysTickCount;
+		if (g_pui32RGBColors[GREEN] == 0x0) {
+			g_pui32RGBColors[GREEN] = 0xFFFF;
+		} else {
+			g_pui32RGBColors[GREEN] = 0x0;
+		}
+
+		RGBColorSet(g_pui32RGBColors);
+	}
 }
 
 //*****************************************************************************
@@ -200,7 +213,6 @@ main(void)
     //
     while(1)
     {
-
         //
         // Send latest state info to host on timer tick
         //
