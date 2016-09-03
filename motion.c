@@ -41,6 +41,8 @@
 #include "sensorlib/ak8975.h"
 #include "sensorlib/mpu9150.h"
 #include "sensorlib/comp_dcm.h"
+#include "sensorlib/quaternion.h"
+#include "sensorlib/vector.h"
 #include "drivers/rgb.h"
 #include "events.h"
 #include "motion.h"
@@ -110,6 +112,10 @@ float g_pfEulers[3];
 float g_pfAccel[3];
 float g_pfGyro[3];
 float g_pfMag[3];
+
+float g_pfInAcceleration[3];
+float g_pfVelocity[3];
+float g_pfPosition[3];
 
 //*****************************************************************************
 //
@@ -393,6 +399,21 @@ MotionInit(void)
     g_ui8MotionState = MOTION_STATE_INIT;
 
     //
+    // Init to zero
+    //
+    g_pfPosition[0] = 0.f;
+    g_pfPosition[1] = 0.f;
+    g_pfPosition[2] = 0.f;
+
+    g_pfVelocity[0] = 0.f;
+    g_pfVelocity[1] = 0.f;
+    g_pfVelocity[2] = 0.f;
+
+	g_pfInAcceleration[0] = 0.f;
+	g_pfInAcceleration[1] = 0.f;
+	g_pfInAcceleration[2] = 0.f;
+
+    //
     // Initialize the MPU9150 Driver.
     //
     MPU9150Init(&g_sMPU9150Inst, &g_sI2CInst, MPU9150_I2C_ADDRESS,
@@ -534,6 +555,62 @@ MotionMain(void)
                                  g_pfEulers + 1, g_pfEulers + 2);
 
             //
+            // Compute absolute position using acceleration
+            // Not going to be very accurate
+            //
+            // First, we need to remove the gravity component of acceleration
+            // Get quarternion representing intertial-to-body transform:
+            float pfInToBodyQuart[4];
+            CompDCMComputeQuaternion(&g_sCompDCMInst, pfInToBodyQuart);
+
+            float mag = QuaternionMagnitude(pfInToBodyQuart);
+            pfInToBodyQuart[0] = pfInToBodyQuart[0] / sqrt(mag);
+            pfInToBodyQuart[1] = pfInToBodyQuart[1] / sqrt(mag);
+            pfInToBodyQuart[2] = pfInToBodyQuart[2] / sqrt(mag);
+
+            // We also will need its inverse (body-to-inertial):
+            // The quaternion library incorrectly normalises, so just do it manually
+            float pfBodyToInQuart[4] = {pfInToBodyQuart[0], -pfInToBodyQuart[1], -pfInToBodyQuart[2], -pfInToBodyQuart[3]};
+            // QuaternionInverse (pfBodyToInQuart, pfInToBodyQuart);
+
+            // Transform measured acceleration vector to inertial frame
+            // http://www.chrobotics.com/library/accel-position-velocity
+            // Need to convert vector to quarternion by setting first comp to 0
+            float tAccelQuart[4] = {0.f, g_pfAccel[0], g_pfAccel[1], g_pfAccel[2]};
+            // float tQuart[4];	// intermediate result
+            // http://www.chrobotics.com/library/understanding-quaternions
+            // QuaternionMult(tQuart, tAccelQuart, pfBodyToInQuart);
+            // QuaternionMult(tQuart, pfInToBodyQuart, tQuart);
+            // Now inertial acceleration would be last 3 components plus gravity
+            // But the quaternion maths isn't working, so just use the vectorised version
+            // ... from wikipedia
+
+            // https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation
+            float tVec1[3];
+            float tVec2[3];
+            float tVec3[3];
+            VectorCrossProduct(tVec1, pfBodyToInQuart+1, tAccelQuart+1);	// r x v
+            VectorScale(tVec2, tAccelQuart+1, pfBodyToInQuart[0]);	// w v
+            VectorAdd(tVec3, tVec1, tVec2);	// r x v + w v
+            VectorScale(tVec1, pfBodyToInQuart+1, 2.f); // 2 r
+            VectorCrossProduct(tVec2, tVec1, tVec3);	// 2r x (r x v + w v)
+            VectorAdd(tVec1, tAccelQuart+1, tVec2);	// v + 2r x (r x v + w v)
+
+            // Acceleration has been transformed to intertial reference
+            // Now... anti-gravity!
+            g_pfInAcceleration[0] = tVec1[0];
+			g_pfInAcceleration[1] = tVec1[1];
+			g_pfInAcceleration[2] = tVec1[2] - 9.81f;
+
+            g_pfVelocity[0] = g_pfVelocity[0] + g_pfInAcceleration[0]/((float) MOTION_SAMPLE_FREQ_HZ);
+            g_pfVelocity[1] = g_pfVelocity[1] + g_pfInAcceleration[1]/((float) MOTION_SAMPLE_FREQ_HZ);
+            g_pfVelocity[2] = g_pfVelocity[2] + g_pfInAcceleration[2]/((float) MOTION_SAMPLE_FREQ_HZ);
+
+            g_pfPosition[0] = g_pfPosition[0] + g_pfVelocity[0]/((float) MOTION_SAMPLE_FREQ_HZ);
+            g_pfPosition[1] = g_pfPosition[1] + g_pfVelocity[1]/((float) MOTION_SAMPLE_FREQ_HZ);
+            g_pfPosition[2] = g_pfPosition[2] + g_pfVelocity[2]/((float) MOTION_SAMPLE_FREQ_HZ);
+
+            //
             // Finished
             //
             break;
@@ -581,9 +658,9 @@ MotionMain(void)
 void
 getIMUState(IMUState* state)
 {
-    state->x = g_pfAccel[0];
-    state->y = g_pfAccel[1];
-    state->z = g_pfAccel[2];
+    state->x = g_pfPosition[0];
+    state->y = g_pfPosition[1];
+    state->z = g_pfPosition[2];
 
 	state->Rx = g_pfEulers[0];
 	state->Ry = g_pfEulers[1];
