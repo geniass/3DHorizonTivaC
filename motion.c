@@ -227,7 +227,7 @@ void MotionCallback(void* pvCallbackData, uint_fast8_t ui8Status)
                                g_pfAccel[2]);
             CompDCMGyroUpdate(&g_sCompDCMInst, -g_pfGyro[0], -g_pfGyro[1],
                               -g_pfGyro[2]);
-            CompDCMUpdate(&g_sCompDCMInst);
+            //CompDCMUpdate(&g_sCompDCMInst);
         }
     }
     else
@@ -408,8 +408,9 @@ MotionInit(void)
     //
     // Write application specifice sensor configuration such as filter settings
     // and sensor range settings.
-    //
-    g_sMPU9150Inst.pui8Data[0] = MPU9150_CONFIG_DLPF_CFG_94_98;
+    //MPU9150_CONFIG_DLPF_CFG_44_42
+    // MPU9150_CONFIG_DLPF_CFG_94_98
+    g_sMPU9150Inst.pui8Data[0] = MPU9150_CONFIG_DLPF_CFG_44_42;
     g_sMPU9150Inst.pui8Data[1] = MPU9150_GYRO_CONFIG_FS_SEL_250;
     g_sMPU9150Inst.pui8Data[2] = (MPU9150_ACCEL_CONFIG_ACCEL_HPF_5HZ |
                                   MPU9150_ACCEL_CONFIG_AFS_SEL_2G);
@@ -512,6 +513,7 @@ MotionMain(void)
         //
         case MOTION_STATE_RUN:
         {
+        	CompDCMUpdate(&g_sCompDCMInst);
             //
             // Get the latest Euler data from the DCM. DCMUpdate is done
             // inside the interrupt routine to insure it is not skipped and
