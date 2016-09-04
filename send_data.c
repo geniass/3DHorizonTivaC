@@ -42,8 +42,8 @@ sendIMUData(void)
     float_to_string(s_Rz, TO_DEG(state.Rz));
 
 	// TODO: UART send the data
-    UARTprintf("Position: %s %s %s\n", s_x, s_y, s_z);
-	UARTprintf("Orientation: %s %s %s\n", s_Rx, s_Ry, s_Rz);
+    //UARTprintf("Position: %s %s %s\n", s_x, s_y, s_z);
+	UARTprintf("IMU: %s %s %s %s %s %s\n", s_x, s_y, s_z, s_Rx, s_Ry, s_Rz);
 }
 
 void

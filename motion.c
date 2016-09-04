@@ -113,6 +113,9 @@ float g_pfAccel[3];
 float g_pfGyro[3];
 float g_pfMag[3];
 
+float g_pfAccelOffsets[3];
+uint32_t g_ui32AccelSampCount;
+
 float g_pfInAcceleration[3];
 float g_pfVelocity[3];
 float g_pfPosition[3];
@@ -178,7 +181,44 @@ MatrixVectorMul(float pfVectorOut[3], float ppfMatrixIn[3][3],
     }
 }
 
+//*****************************************************************************
+//
+// Subtracts one vector from another.
+//
+//*****************************************************************************
+static void
+VectorSubtract(float pfVectorOut[3], float pfVectorIn1[3],
+					   float pfVectorIn2[3])
+{
+	pfVectorOut[0] = pfVectorIn1[0] - pfVectorIn2[0];
+	pfVectorOut[1] = pfVectorIn1[1] - pfVectorIn2[1];
+	pfVectorOut[2] = pfVectorIn1[2] - pfVectorIn2[2];
+}
 
+
+//*****************************************************************************
+//
+// Rotates a vector using a quaternion.
+//
+//*****************************************************************************
+static void
+VectorRotateQuaternion(float pfVectorOut[3], float pfVectorIn[3],
+					   float pfQuaternion[4])
+{
+	// But the quaternion maths isn't working, so just use the vectorised version
+	// ... from wikipedia
+
+	// https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation
+	float tVec1[3];
+	float tVec2[3];
+	float tVec3[3];
+	VectorCrossProduct(tVec1, pfQuaternion+1, pfVectorIn);	// r x v
+	VectorScale(tVec2, pfVectorIn, pfQuaternion[0]);	// w v
+	VectorAdd(tVec3, tVec1, tVec2);	// r x v + w v
+	VectorScale(tVec1, pfQuaternion+1, 2.f); // 2 r
+	VectorCrossProduct(tVec2, tVec1, tVec3);	// 2r x (r x v + w v)
+	VectorAdd(pfVectorOut, pfVectorIn, tVec2);	// v + 2r x (r x v + w v)
+}
 
 
 
@@ -203,7 +243,7 @@ void MotionCallback(void* pvCallbackData, uint_fast8_t ui8Status)
         //
         HWREGBITW(&g_ui32Events, MOTION_EVENT) = 1;
 
-        if(g_ui8MotionState == MOTION_STATE_RUN);
+        if(g_ui8MotionState == MOTION_STATE_RUN || g_ui8MotionState == MOTION_STATE_CALIBRATE);
         {
             //
             // Get local copies of the raw motion sensor data.
@@ -216,6 +256,11 @@ void MotionCallback(void* pvCallbackData, uint_fast8_t ui8Status)
 
             MPU9150DataMagnetoGetFloat(&g_sMPU9150Inst, g_pfMag, g_pfMag + 1,
                                        g_pfMag + 2);
+
+            //
+			// Subtract the offsets computed during calibration
+			//
+			VectorSubtract(g_pfAccel, g_pfAccel, g_pfAccelOffsets);
 
             //
             // Update the DCM. Do this in the ISR so that timing between the
@@ -512,6 +557,11 @@ MotionMain(void)
                                         g_pfGyro + 1, g_pfGyro + 2);
 
                 //
+				// Subtract the offsets computed during calibration
+				//
+				VectorSubtract(g_pfAccel, g_pfAccel, g_pfAccelOffsets);
+
+                //
                 // Feed the initial measurements to the DCM and start it.
                 // Due to the structure of our MotionMagCallback function,
                 // the floating point magneto data is already in the local
@@ -541,6 +591,8 @@ MotionMain(void)
             break;
         }
 
+        // calibrate is a special case of RUN
+        case MOTION_STATE_CALIBRATE: {}
         //
         // DCM has been started and we are ready for normal operations.
         //
@@ -575,9 +627,6 @@ MotionMain(void)
 
             // Transform measured acceleration vector to inertial frame
             // http://www.chrobotics.com/library/accel-position-velocity
-            // Need to convert vector to quarternion by setting first comp to 0
-            float tAccelQuart[4] = {0.f, g_pfAccel[0], g_pfAccel[1], g_pfAccel[2]};
-            // float tQuart[4];	// intermediate result
             // http://www.chrobotics.com/library/understanding-quaternions
             // QuaternionMult(tQuart, tAccelQuart, pfBodyToInQuart);
             // QuaternionMult(tQuart, pfInToBodyQuart, tQuart);
@@ -585,16 +634,10 @@ MotionMain(void)
             // But the quaternion maths isn't working, so just use the vectorised version
             // ... from wikipedia
 
-            // https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation
             float tVec1[3];
             float tVec2[3];
-            float tVec3[3];
-            VectorCrossProduct(tVec1, pfBodyToInQuart+1, tAccelQuart+1);	// r x v
-            VectorScale(tVec2, tAccelQuart+1, pfBodyToInQuart[0]);	// w v
-            VectorAdd(tVec3, tVec1, tVec2);	// r x v + w v
-            VectorScale(tVec1, pfBodyToInQuart+1, 2.f); // 2 r
-            VectorCrossProduct(tVec2, tVec1, tVec3);	// 2r x (r x v + w v)
-            VectorAdd(tVec1, tAccelQuart+1, tVec2);	// v + 2r x (r x v + w v)
+
+            VectorRotateQuaternion(tVec1, g_pfAccel, pfBodyToInQuart);
 
             // Acceleration has been transformed to intertial reference
             // Now... anti-gravity!
@@ -609,6 +652,21 @@ MotionMain(void)
             g_pfPosition[0] = g_pfPosition[0] + g_pfVelocity[0]/((float) MOTION_SAMPLE_FREQ_HZ);
             g_pfPosition[1] = g_pfPosition[1] + g_pfVelocity[1]/((float) MOTION_SAMPLE_FREQ_HZ);
             g_pfPosition[2] = g_pfPosition[2] + g_pfVelocity[2]/((float) MOTION_SAMPLE_FREQ_HZ);
+
+            // Use the gravity-compensated acceleration to find the accelerometer offsets
+            if (g_ui8MotionState == MOTION_STATE_CALIBRATE) {
+            	// if we are calibrating, the accel vector should be all zeros
+            	// so add it to the running average
+            	// https://en.wikipedia.org/wiki/Moving_average#Cumulative_moving_average
+            	VectorRotateQuaternion(tVec2, g_pfAccelOffsets, pfBodyToInQuart);
+            	VectorScale(tVec1, tVec2, g_ui32AccelSampCount);
+            	VectorAdd(tVec1, g_pfInAcceleration, tVec1);
+            	g_ui32AccelSampCount++;
+            	VectorScale(tVec1, tVec1, (float) 1/g_ui32AccelSampCount);
+
+            	// now the offsets must be transformed back to the sensor frame
+            	VectorRotateQuaternion(g_pfAccelOffsets, tVec1, pfInToBodyQuart);
+            }
 
             //
             // Finished
@@ -656,11 +714,27 @@ MotionMain(void)
 }
 
 void
+startCalibration(void)
+{
+	g_ui8MotionState = MOTION_STATE_CALIBRATE;
+	g_ui32AccelSampCount = 0;
+	g_pfAccelOffsets[0] = 0.f;
+	g_pfAccelOffsets[1] = 0.f;
+	g_pfAccelOffsets[2] = 0.f;
+}
+
+void
+stopCalibration(void)
+{
+	g_ui8MotionState = MOTION_STATE_INIT;
+}
+
+void
 getIMUState(IMUState* state)
 {
-    state->x = g_pfPosition[0];
-    state->y = g_pfPosition[1];
-    state->z = g_pfPosition[2];
+    state->x = g_pfInAcceleration[0];
+    state->y = g_pfInAcceleration[1];
+    state->z = g_pfInAcceleration[2];
 
 	state->Rx = g_pfEulers[0];
 	state->Ry = g_pfEulers[1];

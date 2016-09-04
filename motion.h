@@ -67,6 +67,7 @@ extern "C"
 #define MOTION_STATE_INIT       0
 #define MOTION_STATE_RUN        1
 #define MOTION_STATE_ERROR      2
+#define MOTION_STATE_CALIBRATE  3
 
 //*****************************************************************************
 //
@@ -101,6 +102,8 @@ extern void MotionCalStart(uint_fast8_t);
 extern void MotionInit(void);
 extern void MotionMain(void);
 extern void getIMUState(IMUState* state);
+extern void startCalibration(void);
+extern void stopCalibration(void);
 
 //*****************************************************************************
 //

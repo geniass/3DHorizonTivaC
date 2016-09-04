@@ -99,16 +99,47 @@ SysTickIntHandler(void)
     HWREGBITW(&g_ui32Events, USB_TICK_EVENT) = 1;
     g_ui8Buttons = ButtonsPoll(0, 0);
 
-	if ((g_ui32SysTickCount - g_ui32PrevSysTickCount)
-			> SYSTICKS_PER_SECOND / 2.f) {
-		g_ui32PrevSysTickCount = g_ui32SysTickCount;
-		if (g_pui32RGBColors[GREEN] == 0x0) {
-			g_pui32RGBColors[GREEN] = 0xFFFF;
-		} else {
-			g_pui32RGBColors[GREEN] = 0x0;
-		}
+    if (g_ui8Buttons & RIGHT_BUTTON) {
+    	// calibration button pressed!
+    	HWREGBITW(&g_ui32Events, CALIBRATION) = 1;
+    	g_ui32PrevSysTickCount = g_ui32SysTickCount;
 
+		// switch on blue
+    	g_pui32RGBColors[GREEN] = 0x0;
+		g_pui32RGBColors[BLUE] = 0xFFFF;
 		RGBColorSet(g_pui32RGBColors);
+
+    	startCalibration();
+    }
+
+	// state machine time!
+	if (HWREGBITW(&g_ui32Events, CALIBRATION) == 1) {
+		// calibration in progress
+		// wait for calibration period to end
+		if ((g_ui32SysTickCount - g_ui32PrevSysTickCount)
+				> SYSTICKS_PER_SECOND * 10.f) {
+			// end of calibration
+			HWREGBITW(&g_ui32Events, CALIBRATION) = 0;
+			g_ui32PrevSysTickCount = g_ui32SysTickCount;
+
+			// calibration done, switch off blue
+			g_pui32RGBColors[BLUE] = 0x0;
+			RGBColorSet(g_pui32RGBColors);
+
+			stopCalibration();
+		}
+	} else {
+		// normal mode, just blink the green LED
+		if ((g_ui32SysTickCount - g_ui32PrevSysTickCount)
+				> SYSTICKS_PER_SECOND * 2.f) {
+			g_ui32PrevSysTickCount = g_ui32SysTickCount;
+			if (g_pui32RGBColors[GREEN] == 0x0) {
+				g_pui32RGBColors[GREEN] = 0xFFFF;
+			} else {
+				g_pui32RGBColors[GREEN] = 0x0;
+			}
+			RGBColorSet(g_pui32RGBColors);
+		}
 	}
 }
 

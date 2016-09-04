@@ -56,7 +56,6 @@ extern volatile uint_fast32_t g_ui32Events;
 #define USB_TICK_EVENT          0
 #define MOTION_EVENT            1
 #define MOTION_ERROR_EVENT      2
-#define LPRF_EVENT              3
-#define LPRF_TICK_EVENT         4
+#define CALIBRATION             3
 
 #endif // __EVENTS_H__
