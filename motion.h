@@ -71,6 +71,13 @@ extern "C"
 
 //*****************************************************************************
 //
+// Define BMP180 I2C Address.
+//
+//*****************************************************************************
+#define BMP180_I2C_ADDRESS      0x77
+
+//*****************************************************************************
+//
 // Define the states of the motion state machine.
 //
 //*****************************************************************************
@@ -104,6 +111,7 @@ extern void MotionMain(void);
 extern void getIMUState(IMUState* state);
 extern void startCalibration(void);
 extern void stopCalibration(void);
+extern void beginBarometerRead(void);
 
 //*****************************************************************************
 //

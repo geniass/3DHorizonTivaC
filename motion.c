@@ -37,10 +37,12 @@
 #include "utils/uartstdio.h"
 #include "sensorlib/hw_mpu9150.h"
 #include "sensorlib/hw_ak8975.h"
+#include "sensorlib/hw_bmp180.h"
 #include "sensorlib/i2cm_drv.h"
 #include "sensorlib/ak8975.h"
 #include "sensorlib/mpu9150.h"
 #include "sensorlib/comp_dcm.h"
+#include "sensorlib/bmp180.h"
 #include "sensorlib/quaternion.h"
 #include "sensorlib/vector.h"
 #include "drivers/rgb.h"
@@ -120,13 +122,18 @@ float g_pfInAcceleration[3];
 float g_pfVelocity[3];
 float g_pfPosition[3];
 
+float g_pfTemperature;
+float g_pfPressure;
+float g_pfBarometerPosition;
+float g_pfBarometerOffset;
+uint32_t g_ui32BarometerSampCount;
+
 //*****************************************************************************
 //
-// Global storage for previous net acceleration magnitude reading. Helps smooth
-// the emit classify readings.
+// Global instance structure for the BMP180 sensor driver.
 //
 //*****************************************************************************
-float g_fAccelMagnitudePrevious;
+tBMP180 g_sBMP180Inst;
 
 //*****************************************************************************
 //
@@ -220,6 +227,40 @@ VectorRotateQuaternion(float pfVectorOut[3], float pfVectorIn[3],
 	VectorAdd(pfVectorOut, pfVectorIn, tVec2);	// v + 2r x (r x v + w v)
 }
 
+//*****************************************************************************
+//
+// Calculates the altitude using the measured pressure
+//
+//*****************************************************************************
+float calcAltitude(float fPressure)
+{
+	return 44330.0f * (1.0f - powf(fPressure / 101325.0f, 1.0f / 5.255f));
+}
+
+//*****************************************************************************
+//
+// BMP180 Sensor callback function.  Called at the end of BMP180 sensor driver
+// transactions. This is called from I2C interrupt context.
+//
+//*****************************************************************************
+void BMP180Callback(void* pvCallbackData, uint_fast8_t ui8Status)
+{
+    if(ui8Status == I2CM_STATUS_SUCCESS)
+    {
+    	// Barometer data is ready
+    	HWREGBITW(&g_ui32Events, BAROMETER_EVENT) = 1;
+
+    	//
+		// Get a local copy of the latest temperature data in float format.
+		//
+		BMP180DataTemperatureGetFloat(&g_sBMP180Inst, &g_pfTemperature);
+
+		//
+		// Get a local copy of the latest air pressure data in float format.
+		//
+		BMP180DataPressureGetFloat(&g_sBMP180Inst, &g_pfPressure);
+    }
+}
 
 
 
@@ -349,13 +390,13 @@ MotionErrorHandler(char * pcFilename, uint_fast32_t ui32Line)
 //
 //*****************************************************************************
 void
-MotionI2CWait(char* pcFilename, uint_fast32_t ui32Line)
+MotionI2CWait(uint_fast32_t flag, char* pcFilename, uint_fast32_t ui32Line)
 {
     //
     // Put the processor to sleep while we wait for the I2C driver to
     // indicate that the transaction is complete.
     //
-    while((HWREGBITW(&g_ui32Events, MOTION_EVENT) == 0) &&
+    while((HWREGBITW(&g_ui32Events, flag) == 0) &&
           (g_vui8ErrorFlag == 0))
     {
         //
@@ -366,7 +407,7 @@ MotionI2CWait(char* pcFilename, uint_fast32_t ui32Line)
     //
     // clear the event flag.
     //
-    HWREGBITW(&g_ui32Events, MOTION_EVENT) = 0;
+    HWREGBITW(&g_ui32Events, flag) = 0;
 
     //
     // If an error occurred call the error handler immediately.
@@ -467,7 +508,7 @@ MotionInit(void)
     //
     // Wait for transaction to complete
     //
-    MotionI2CWait(__FILE__, __LINE__);
+    MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
 
     /*
     //
@@ -494,7 +535,7 @@ MotionInit(void)
     //
     // Wait for transaction to complete
     //
-    MotionI2CWait(__FILE__, __LINE__);
+    MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
 
     //
     // Configure the data ready interrupt pin output of the MPU9150.
@@ -509,13 +550,28 @@ MotionInit(void)
     //
     // Wait for transaction to complete
     //
-    MotionI2CWait(__FILE__, __LINE__);
+    MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
 
     //
     // Initialize the DCM system.
     //
     CompDCMInit(&g_sCompDCMInst, 1.0f / ((float) MOTION_SAMPLE_FREQ_HZ),
                 DCM_ACCEL_WEIGHT, DCM_GYRO_WEIGHT, DCM_MAG_WEIGHT);
+
+    //
+	// Initialize the BMP180.
+	//
+	BMP180Init(&g_sBMP180Inst, &g_sI2CInst, BMP180_I2C_ADDRESS,
+			   BMP180Callback, &g_sBMP180Inst);
+	MotionI2CWait(BAROMETER_EVENT, __FILE__, __LINE__);
+
+	//
+	// Enable 8x oversampling for high resolution
+	//
+	BMP180ReadModifyWrite(&g_sBMP180Inst, BMP180_O_CTRL_MEAS,
+							~BMP180_CTRL_MEAS_OSS_M, BMP180_CTRL_MEAS_OSS_8,
+							BMP180Callback, 0);
+	MotionI2CWait(BAROMETER_EVENT, __FILE__, __LINE__);
 
     // Init is now done
     g_pui32RGBColors[RED] = 0x0;
@@ -542,8 +598,9 @@ MotionMain(void)
             // Check the read data buffer of the MPU9150 to see if the
             // Magnetometer data is ready and present. This may not be the case
             // for the first few data captures.
+        	// Also check if the barometer has data ready
             //
-            if(g_sMPU9150Inst.pui8Data[14] & AK8975_ST1_DRDY)
+            if(g_sMPU9150Inst.pui8Data[14] & AK8975_ST1_DRDY && HWREGBITW(&g_ui32Events, BAROMETER_EVENT))
             {
                 //
                 // Get local copy of Accel and Mag data to feed to the DCM
@@ -560,6 +617,9 @@ MotionMain(void)
 				// Subtract the offsets computed during calibration
 				//
 				VectorSubtract(g_pfAccel, g_pfAccel, g_pfAccelOffsets);
+
+				// Reset the vertical position after calibration because its probably in error
+				g_pfPosition[2] = 0;
 
                 //
                 // Feed the initial measurements to the DCM and start it.
@@ -578,6 +638,9 @@ MotionMain(void)
 				//
 				g_pui32RGBColors[MOTION_LED(g_ui8MotionState)] = 0;
 				RGBColorSet(g_pui32RGBColors);
+
+				// clear the data ready flag
+				HWREGBITW(&g_ui32Events, BAROMETER_EVENT) = 0;
 
                 //
                 // Proceed to the run state.
@@ -649,11 +712,19 @@ MotionMain(void)
             g_pfVelocity[1] = g_pfVelocity[1] + g_pfInAcceleration[1]/((float) MOTION_SAMPLE_FREQ_HZ);
             g_pfVelocity[2] = g_pfVelocity[2] + g_pfInAcceleration[2]/((float) MOTION_SAMPLE_FREQ_HZ);
 
-            g_pfPosition[0] = g_pfPosition[0] + g_pfVelocity[0]/((float) MOTION_SAMPLE_FREQ_HZ);
-            g_pfPosition[1] = g_pfPosition[1] + g_pfVelocity[1]/((float) MOTION_SAMPLE_FREQ_HZ);
-            g_pfPosition[2] = g_pfPosition[2] + g_pfVelocity[2]/((float) MOTION_SAMPLE_FREQ_HZ);
+            //
+            // Use the barometer's computed altitude to compensate the accelerometer position
+            //
+            float fAltitude = calcAltitude(g_pfPressure);
+            g_pfBarometerPosition = fAltitude - g_pfBarometerOffset;
+            g_pfPosition[2] = 0.02f * (g_pfBarometerPosition) + 0.98f * (g_pfPosition[2] + g_pfInAcceleration[2] /((float) MOTION_SAMPLE_FREQ_HZ) /((float) MOTION_SAMPLE_FREQ_HZ));
 
+            //
+            // Sensor calibration section
             // Use the gravity-compensated acceleration to find the accelerometer offsets
+            // Also find the average accelerometer alititude so it can be subtracted later
+            // to get the change in altitude for heave measurement
+            //
             if (g_ui8MotionState == MOTION_STATE_CALIBRATE) {
             	// if we are calibrating, the accel vector should be all zeros
             	// so add it to the running average
@@ -666,7 +737,16 @@ MotionMain(void)
 
             	// now the offsets must be transformed back to the sensor frame
             	VectorRotateQuaternion(g_pfAccelOffsets, tVec1, pfInToBodyQuart);
+
+            	//
+            	// Keep a running average of the barometer altitude
+            	//
+            	g_pfBarometerOffset = (fAltitude + (float) g_ui32BarometerSampCount * g_pfBarometerOffset) / ((float) g_ui32BarometerSampCount + 1.f);
+            	g_ui32BarometerSampCount++;
             }
+
+            // clear the data ready flag
+			HWREGBITW(&g_ui32Events, BAROMETER_EVENT) = 0;
 
             //
             // Finished
@@ -721,6 +801,9 @@ startCalibration(void)
 	g_pfAccelOffsets[0] = 0.f;
 	g_pfAccelOffsets[1] = 0.f;
 	g_pfAccelOffsets[2] = 0.f;
+
+	g_ui32BarometerSampCount = 0;
+	g_pfBarometerOffset = 0.f;
 }
 
 void
@@ -732,11 +815,17 @@ stopCalibration(void)
 void
 getIMUState(IMUState* state)
 {
-    state->x = g_pfInAcceleration[0];
-    state->y = g_pfInAcceleration[1];
-    state->z = g_pfInAcceleration[2];
+    state->x = g_pfTemperature;
+    state->y = g_pfBarometerPosition;
+    state->z = g_pfPosition[2];
 
 	state->Rx = g_pfEulers[0];
 	state->Ry = g_pfEulers[1];
 	state->Rz = g_pfEulers[2];
+}
+
+void
+beginBarometerRead()
+{
+	BMP180DataRead(&g_sBMP180Inst, BMP180Callback, &g_sBMP180Inst);
 }

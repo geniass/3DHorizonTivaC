@@ -30,7 +30,7 @@
 // Number of SysTick Timer interrupts per second.
 //
 //*****************************************************************************
-#define SYSTICKS_PER_SECOND     50
+#define SYSTICKS_PER_SECOND     10
 
 //*****************************************************************************
 //
@@ -57,5 +57,6 @@ extern volatile uint_fast32_t g_ui32Events;
 #define MOTION_EVENT            1
 #define MOTION_ERROR_EVENT      2
 #define CALIBRATION             3
+#define BAROMETER_EVENT			4
 
 #endif // __EVENTS_H__
