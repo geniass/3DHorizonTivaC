@@ -819,9 +819,9 @@ getIMUState(IMUState* state)
     state->y = g_pfBarometerPosition;
     state->z = g_pfPosition[2];
 
-	state->Rx = g_pfEulers[0];
-	state->Ry = g_pfEulers[1];
-	state->Rz = g_pfEulers[2];
+	state->roll = TO_DEG(g_pfEulers[1]);
+	state->pitch = TO_DEG(g_pfEulers[0]);
+	state->yaw = TO_DEG(g_pfEulers[2]);
 }
 
 void

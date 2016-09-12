@@ -37,9 +37,9 @@ sendIMUData(void)
     float_to_string(s_x, state.x);
     float_to_string(s_y, state.y);
     float_to_string(s_z, state.z);
-    float_to_string(s_Rx, TO_DEG(state.Rx));
-    float_to_string(s_Ry, TO_DEG(state.Ry));
-    float_to_string(s_Rz, TO_DEG(state.Rz));
+    float_to_string(s_Rx, state.roll);
+    float_to_string(s_Ry, state.pitch);
+    float_to_string(s_Rz, state.yaw);
 
 	// TODO: UART send the data
     //UARTprintf("Position: %s %s %s\n", s_x, s_y, s_z);

@@ -30,7 +30,7 @@
 // Number of SysTick Timer interrupts per second.
 //
 //*****************************************************************************
-#define SYSTICKS_PER_SECOND     10
+#define SYSTICKS_PER_SECOND     60
 
 //*****************************************************************************
 //
