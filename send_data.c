@@ -22,32 +22,36 @@
 #include "send_data.h"
 
 void
-sendIMUData(void)
+float_to_ints(int32_t *integer, uint32_t *fractional, float f)
 {
-    IMUState state;
-    char s_x[16];
-    char s_y[16];
-    char s_z[16];
-    char s_Rx[16];
-    char s_Ry[16];
-    char s_Rz[16];
-
-    getIMUState(&state);
-
-    float_to_string(s_x, state.x);
-    float_to_string(s_y, state.y);
-    float_to_string(s_z, state.z);
-    float_to_string(s_Rx, state.roll);
-    float_to_string(s_Ry, state.pitch);
-    float_to_string(s_Rz, state.yaw);
-
-	// TODO: UART send the data
-    //UARTprintf("Position: %s %s %s\n", s_x, s_y, s_z);
-	UARTprintf("IMU: %s %s %s %s %s %s\n", s_x, s_y, s_z, s_Rx, s_Ry, s_Rz);
+	// truncate fractional part to get just integer part
+	*integer = (int32_t) f;
+	// get fractional part by multiplying and removing integer part
+	*fractional = ((uint32_t) abs(f * FLOAT_FRAC_MULTIPLIER));
+	*fractional -= ((uint32_t) abs(*integer) * FLOAT_FRAC_MULTIPLIER);
 }
 
 void
-float_to_string(char* str, float f)
+sendIMUData(void)
 {
-	sprintf(str,"%f",f);
+    IMUState state;
+    getIMUState(&state);
+
+    int32_t i32X_int, i32Y_int, i32Z_int, i32RX_int, i32RY_int, i32RZ_int;
+    uint32_t ui32X_frac, ui32Y_frac, ui32Z_frac, ui32RX_frac, ui32RY_frac, ui32RZ_frac;
+
+    float_to_ints(&i32X_int, &ui32X_frac, state.x);
+    float_to_ints(&i32Y_int, &ui32Y_frac, state.y);
+    float_to_ints(&i32Z_int, &ui32Z_frac, state.z);
+    float_to_ints(&i32RX_int, &ui32RX_frac, state.roll);
+    float_to_ints(&i32RY_int, &ui32RY_frac, state.pitch);
+    float_to_ints(&i32RZ_int, &ui32RZ_frac, state.yaw);
+
+    UARTprintf("IMU: %d.%u %d.%u %d.%u %d.%u %d.%u %d.%u\n", i32X_int, ui32X_frac,
+    														i32Y_int, ui32Y_frac,
+															i32Z_int, ui32Z_frac,
+															i32RX_int, ui32RX_frac,
+															i32RY_int, ui32RY_frac,
+															i32RZ_int, ui32RZ_frac);
 }
+
