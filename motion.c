@@ -284,6 +284,7 @@ void MotionCallback(void* pvCallbackData, uint_fast8_t ui8Status)
         //
         HWREGBITW(&g_ui32Events, MOTION_EVENT) = 1;
 
+
         if(g_ui8MotionState == MOTION_STATE_RUN || g_ui8MotionState == MOTION_STATE_CALIBRATE);
         {
             //
@@ -314,6 +315,8 @@ void MotionCallback(void* pvCallbackData, uint_fast8_t ui8Status)
             CompDCMGyroUpdate(&g_sCompDCMInst, -g_pfGyro[0], -g_pfGyro[1],
                               -g_pfGyro[2]);
             CompDCMUpdate(&g_sCompDCMInst);
+
+            beginBarometerRead();
         }
     }
     else
@@ -322,8 +325,6 @@ void MotionCallback(void* pvCallbackData, uint_fast8_t ui8Status)
         // An Error occurred in the I2C transaction.
         //
         HWREGBITW(&g_ui32Events, MOTION_ERROR_EVENT) = 1;
-        g_ui8MotionState = MOTION_STATE_ERROR;
-        g_ui32RGBMotionBlinkCounter = g_ui32SysTickCount;
     }
 
     //
@@ -382,6 +383,13 @@ MotionErrorHandler(char * pcFilename, uint_fast32_t ui32Line)
     // Return terminal color to normal
     //
     UARTprintf("\033[0m");
+
+    RGBBlinkRateSet(5.f);
+
+    while(1)
+    {
+
+    }
 }
 
 //*****************************************************************************
@@ -468,6 +476,8 @@ MotionInit(void)
     ROM_GPIOIntTypeSet(GPIO_PORTB_BASE, GPIO_PIN_2, GPIO_FALLING_EDGE);
     ROM_IntEnable(INT_GPIOB);
 
+    ROM_GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_5);
+
     //
     // Enable interrupts to the processor.
     //
@@ -510,22 +520,20 @@ MotionInit(void)
     //
     MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
 
-    /*
     //
 	// Configure the sampling rate to 1000 Hz / (1+24) = 40 Hz.
 	//
-	g_sMPU9150Inst.pui8Data[0] = 24;
+	g_sMPU9150Inst.pui8Data[0] = 49;
 	MPU9150Write(&g_sMPU9150Inst, MPU9150_O_SMPLRT_DIV, g_sMPU9150Inst.pui8Data,
 			1, MotionCallback, &g_sMPU9150Inst);
-	MotionI2CWait(__FILE__, __LINE__);
-	*/
+	MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
 
     //
     // Write application specific sensor configuration such as filter settings
     // and sensor range settings.
     //MPU9150_CONFIG_DLPF_CFG_44_42
     // MPU9150_CONFIG_DLPF_CFG_94_98
-    g_sMPU9150Inst.pui8Data[0] = MPU9150_CONFIG_DLPF_CFG_44_42;
+    g_sMPU9150Inst.pui8Data[0] = MPU9150_CONFIG_DLPF_CFG_5_5;
     g_sMPU9150Inst.pui8Data[1] = MPU9150_GYRO_CONFIG_FS_SEL_250;
     g_sMPU9150Inst.pui8Data[2] = (MPU9150_ACCEL_CONFIG_ACCEL_HPF_5HZ |
                                   MPU9150_ACCEL_CONFIG_AFS_SEL_2G);
@@ -633,12 +641,6 @@ MotionMain(void)
                                    g_pfAccel[2]);
                 CompDCMStart(&g_sCompDCMInst);
 
-                //
-				// Turn off the LED to show we are done processing motion data.
-				//
-				g_pui32RGBColors[MOTION_LED(g_ui8MotionState)] = 0;
-				RGBColorSet(g_pui32RGBColors);
-
 				// clear the data ready flag
 				HWREGBITW(&g_ui32Events, BAROMETER_EVENT) = 0;
 
@@ -662,12 +664,11 @@ MotionMain(void)
         case MOTION_STATE_RUN:
         {
             //
-            // Get the latest Euler data from the DCM. DCMUpdate is done
-            // inside the interrupt routine to insure it is not skipped and
-            // that the timing is consistent.
-            //
-            CompDCMComputeEulers(&g_sCompDCMInst, g_pfEulers,
-                                 g_pfEulers + 1, g_pfEulers + 2);
+			// Turn on the LED to show we are processing motion data.
+			//
+			g_pui32RGBColors[MOTION_LED(MOTION_STATE_RUN)] = 0xFFFF;
+			RGBColorSet(g_pui32RGBColors);
+
 
             //
             // Compute absolute position using acceleration
@@ -748,6 +749,13 @@ MotionMain(void)
             // clear the data ready flag
 			HWREGBITW(&g_ui32Events, BAROMETER_EVENT) = 0;
 
+
+            //
+			// Turn off the LED to show we are done processing motion data.
+			//
+			g_pui32RGBColors[MOTION_LED(MOTION_STATE_RUN)] = 0;
+			RGBColorSet(g_pui32RGBColors);
+
             //
             // Finished
             //
@@ -763,31 +771,7 @@ MotionMain(void)
         //
         case MOTION_STATE_ERROR:
         {
-        	UARTprintf("I2C Error occurred\n");
-            //
-            // Our tick counter and blink mechanism may not be safe across
-            // rollovers of the g_ui32SysTickCount variable.  This rollover
-            // only occurs after 1.3+ years of continuous operation.
-            //
-            if(g_ui32SysTickCount > (g_ui32RGBMotionBlinkCounter + 20))
-            {
-                //
-                // 20 ticks have expired since we last toggled so turn off the
-                // LED and reset the counter.
-                //
-                g_ui32RGBMotionBlinkCounter = g_ui32SysTickCount;
-                g_pui32RGBColors[RED] = 0;
-                RGBColorSet(g_pui32RGBColors);
-            }
-            else if(g_ui32SysTickCount == (g_ui32RGBMotionBlinkCounter + 10))
-            {
-                //
-                // 10 ticks have expired since the last counter reset.  turn
-                // on the RED LED.
-                //
-                g_pui32RGBColors[RED] = 0xFFFF;
-                RGBColorSet(g_pui32RGBColors);
-            }
+        	MotionErrorHandler(__FILE__, __LINE__);
             break;
         }
     }
@@ -815,6 +799,14 @@ stopCalibration(void)
 void
 getIMUState(IMUState* state)
 {
+    //
+    // Get the latest Euler data from the DCM. DCMUpdate is done
+    // inside the interrupt routine to insure it is not skipped and
+    // that the timing is consistent.
+    //
+    CompDCMComputeEulers(&g_sCompDCMInst, g_pfEulers,
+                         g_pfEulers + 1, g_pfEulers + 2);
+
     state->x = g_pfTemperature;
     state->y = g_pfBarometerPosition;
     state->z = g_pfPosition[2];

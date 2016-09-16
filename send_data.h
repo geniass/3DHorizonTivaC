@@ -12,10 +12,9 @@
 // Fractional part multiplier = 10^{E}
 // where E is the num of desired decimal places
 //
-#define FLOAT_FRAC_MULTIPLIER	1000.f
+#define FLOAT_FRAC_MULTIPLIER	100
 
 void sendIMUData(void);
-void float_to_ints(int32_t *integer, uint32_t *fractional, float f);
 
 
 #endif /* SEND_DATA_H_ */

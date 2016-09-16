@@ -71,7 +71,7 @@ volatile uint_fast8_t g_ui8Buttons;
 //
 //*****************************************************************************
 volatile uint_fast32_t g_ui32SysTickCount;
-volatile uint_fast32_t g_ui32PrevSysTickCount;
+volatile uint_fast32_t g_ui32CalibrationTickCount;
 
 //*****************************************************************************
 //
@@ -95,55 +95,9 @@ __error__(char *pcFilename, uint32_t ui32Line)
 void
 SysTickIntHandler(void)
 {
-	// read the barometer at 10 Hz
-	beginBarometerRead();
+    HWREGBITW(&g_ui32Events, USB_TICK_EVENT) = 1;
 
     g_ui32SysTickCount++;
-    HWREGBITW(&g_ui32Events, USB_TICK_EVENT) = 1;
-    g_ui8Buttons = ButtonsPoll(0, 0);
-
-    if (g_ui8Buttons & RIGHT_BUTTON) {
-    	// calibration button pressed!
-    	HWREGBITW(&g_ui32Events, CALIBRATION) = 1;
-    	g_ui32PrevSysTickCount = g_ui32SysTickCount;
-
-		// switch on blue
-    	g_pui32RGBColors[GREEN] = 0x0;
-		g_pui32RGBColors[BLUE] = 0xFFFF;
-		RGBColorSet(g_pui32RGBColors);
-
-    	startCalibration();
-    }
-
-	// state machine time!
-	if (HWREGBITW(&g_ui32Events, CALIBRATION) == 1) {
-		// calibration in progress
-		// wait for calibration period to end
-		if ((g_ui32SysTickCount - g_ui32PrevSysTickCount)
-				> SYSTICKS_PER_SECOND * 10.f) {
-			// end of calibration
-			HWREGBITW(&g_ui32Events, CALIBRATION) = 0;
-			g_ui32PrevSysTickCount = g_ui32SysTickCount;
-
-			// calibration done, switch off blue
-			g_pui32RGBColors[BLUE] = 0x0;
-			RGBColorSet(g_pui32RGBColors);
-
-			stopCalibration();
-		}
-	} else {
-		// normal mode, just blink the green LED
-		if ((g_ui32SysTickCount - g_ui32PrevSysTickCount)
-				> SYSTICKS_PER_SECOND * 2.f) {
-			g_ui32PrevSysTickCount = g_ui32SysTickCount;
-			if (g_pui32RGBColors[GREEN] == 0x0) {
-				g_pui32RGBColors[GREEN] = 0xFFFF;
-			} else {
-				g_pui32RGBColors[GREEN] = 0x0;
-			}
-			RGBColorSet(g_pui32RGBColors);
-		}
-	}
 }
 
 //*****************************************************************************
@@ -225,7 +179,6 @@ main(void)
     ROM_IntPrioritySet(INT_I2C3, 0x00);
     ROM_IntPrioritySet(INT_GPIOB, 0x10);
     ROM_IntPrioritySet(FAULT_SYSTICK, 0x20);
-    ROM_IntPrioritySet(INT_UART1, 0x60);
     ROM_IntPrioritySet(INT_UART0, 0x70);
     ROM_IntPrioritySet(INT_WTIMER5B, 0x80);
 
@@ -233,7 +186,12 @@ main(void)
     // User Interface Init
     //
     ButtonsInit();
+
     RGBInit(0);
+    g_pui32RGBColors[RED] = 0xFFFF;
+    g_pui32RGBColors[BLUE] = 0;
+    g_pui32RGBColors[GREEN] = 0;
+	RGBColorSet(g_pui32RGBColors);
     RGBEnable();
 
     //
@@ -257,7 +215,7 @@ main(void)
             //
             HWREGBITW(&g_ui32Events, USB_TICK_EVENT) = 0;
 
-			sendIMUData();
+//			sendIMUData();
         }
 
 
@@ -277,6 +235,43 @@ main(void)
             // Process the motion data that has been captured
             //
             MotionMain();
+            sendIMUData();
         }
-    }
+
+        //
+        // Check for button presses
+        //
+        g_ui8Buttons = ButtonsPoll(0, 0);
+		if (g_ui8Buttons & RIGHT_BUTTON) {
+			// calibration button pressed!
+			HWREGBITW(&g_ui32Events, CALIBRATION) = 1;
+			g_ui32CalibrationTickCount = g_ui32SysTickCount;
+
+			// switch on blue
+			g_pui32RGBColors[GREEN] = 0x0;
+			g_pui32RGBColors[BLUE] = 0xFFFF;
+			RGBColorSet(g_pui32RGBColors);
+
+			startCalibration();
+		}
+
+		//
+		// Calibration in progress
+		//
+		if (HWREGBITW(&g_ui32Events, CALIBRATION) == 1) {
+			// wait for calibration period to end
+			if (g_ui32SysTickCount
+					> g_ui32CalibrationTickCount + SYSTICKS_PER_SECOND * 10.f) {
+				// end of calibration
+				HWREGBITW(&g_ui32Events, CALIBRATION) = 0;
+				g_ui32CalibrationTickCount = g_ui32SysTickCount;
+
+				// calibration done, switch off blue
+				g_pui32RGBColors[BLUE] = 0x0;
+				RGBColorSet(g_pui32RGBColors);
+
+				stopCalibration();
+			}
+		}
+	}
 }
