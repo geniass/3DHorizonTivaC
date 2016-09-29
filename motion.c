@@ -41,7 +41,7 @@
 #include "sensorlib/i2cm_drv.h"
 #include "sensorlib/ak8975.h"
 #include "sensorlib/mpu9150.h"
-#include "sensorlib/comp_dcm.h"
+#include "MadgwickAHRS/MadgwickAHRS.h"
 #include "sensorlib/bmp180.h"
 #include "sensorlib/quaternion.h"
 #include "sensorlib/vector.h"
@@ -83,13 +83,6 @@ tI2CMInstance g_sI2CInst;
 //
 //*****************************************************************************
 tMPU9150 g_sMPU9150Inst;
-
-//*****************************************************************************
-//
-// Global Instance structure to manage the DCM state.
-//
-//*****************************************************************************
-tCompDCM g_sCompDCMInst;
 
 //*****************************************************************************
 //
@@ -304,18 +297,6 @@ void MotionCallback(void* pvCallbackData, uint_fast8_t ui8Status)
 			//
 			VectorSubtract(g_pfAccel, g_pfAccel, g_pfAccelOffsets);
 
-            //
-            // Update the DCM. Do this in the ISR so that timing between the
-            // calls is consistent and accurate.
-            //
-            CompDCMMagnetoUpdate(&g_sCompDCMInst, g_pfMag[0], g_pfMag[1],
-                                 g_pfMag[2]);
-            CompDCMAccelUpdate(&g_sCompDCMInst, g_pfAccel[0], g_pfAccel[1],
-                               g_pfAccel[2]);
-            CompDCMGyroUpdate(&g_sCompDCMInst, -g_pfGyro[0], -g_pfGyro[1],
-                              -g_pfGyro[2]);
-            CompDCMUpdate(&g_sCompDCMInst);
-
             beginBarometerRead();
         }
     }
@@ -523,7 +504,7 @@ MotionInit(void)
     //
 	// Configure the sampling rate to 1000 Hz / (1+24) = 40 Hz.
 	//
-	g_sMPU9150Inst.pui8Data[0] = 49;
+	g_sMPU9150Inst.pui8Data[0] = 19;
 	MPU9150Write(&g_sMPU9150Inst, MPU9150_O_SMPLRT_DIV, g_sMPU9150Inst.pui8Data,
 			1, MotionCallback, &g_sMPU9150Inst);
 	MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
@@ -559,12 +540,6 @@ MotionInit(void)
     // Wait for transaction to complete
     //
     MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
-
-    //
-    // Initialize the DCM system.
-    //
-    CompDCMInit(&g_sCompDCMInst, 1.0f / ((float) MOTION_SAMPLE_FREQ_HZ),
-                DCM_ACCEL_WEIGHT, DCM_GYRO_WEIGHT, DCM_MAG_WEIGHT);
 
     //
 	// Initialize the BMP180.
@@ -635,11 +610,9 @@ MotionMain(void)
                 // the floating point magneto data is already in the local
                 // data buffer.
                 //
-                CompDCMMagnetoUpdate(&g_sCompDCMInst, g_pfMag[0], g_pfMag[1],
-                                     g_pfMag[2]);
-                CompDCMAccelUpdate(&g_sCompDCMInst, g_pfAccel[0], g_pfAccel[1],
-                                   g_pfAccel[2]);
-                CompDCMStart(&g_sCompDCMInst);
+                MadgwickAHRSupdate(-g_pfGyro[0], -g_pfGyro[1], -g_pfGyro[2],
+									g_pfAccel[0], g_pfAccel[1], g_pfAccel[2],
+									g_pfMag[0], g_pfMag[1], g_pfMag[2]);
 
 				// clear the data ready flag
 				HWREGBITW(&g_ui32Events, BAROMETER_EVENT) = 0;
@@ -669,86 +642,16 @@ MotionMain(void)
 			g_pui32RGBColors[MOTION_LED(MOTION_STATE_RUN)] = 0xFFFF;
 			RGBColorSet(g_pui32RGBColors);
 
-
-            //
-            // Compute absolute position using acceleration
-            // Not going to be very accurate
-            //
-            // First, we need to remove the gravity component of acceleration
-            // Get quarternion representing intertial-to-body transform:
-            float pfInToBodyQuart[4];
-            CompDCMComputeQuaternion(&g_sCompDCMInst, pfInToBodyQuart);
-
-            float mag = QuaternionMagnitude(pfInToBodyQuart);
-            pfInToBodyQuart[0] = pfInToBodyQuart[0] / sqrt(mag);
-            pfInToBodyQuart[1] = pfInToBodyQuart[1] / sqrt(mag);
-            pfInToBodyQuart[2] = pfInToBodyQuart[2] / sqrt(mag);
-
-            // We also will need its inverse (body-to-inertial):
-            // The quaternion library incorrectly normalises, so just do it manually
-            float pfBodyToInQuart[4] = {pfInToBodyQuart[0], -pfInToBodyQuart[1], -pfInToBodyQuart[2], -pfInToBodyQuart[3]};
-            // QuaternionInverse (pfBodyToInQuart, pfInToBodyQuart);
-
-            // Transform measured acceleration vector to inertial frame
-            // http://www.chrobotics.com/library/accel-position-velocity
-            // http://www.chrobotics.com/library/understanding-quaternions
-            // QuaternionMult(tQuart, tAccelQuart, pfBodyToInQuart);
-            // QuaternionMult(tQuart, pfInToBodyQuart, tQuart);
-            // Now inertial acceleration would be last 3 components plus gravity
-            // But the quaternion maths isn't working, so just use the vectorised version
-            // ... from wikipedia
-
-            float tVec1[3];
-            float tVec2[3];
-
-            VectorRotateQuaternion(tVec1, g_pfAccel, pfBodyToInQuart);
-
-            // Acceleration has been transformed to intertial reference
-            // Now... anti-gravity!
-            g_pfInAcceleration[0] = tVec1[0];
-			g_pfInAcceleration[1] = tVec1[1];
-			g_pfInAcceleration[2] = tVec1[2] - 9.81f;
-
-            g_pfVelocity[0] = g_pfVelocity[0] + g_pfInAcceleration[0]/((float) MOTION_SAMPLE_FREQ_HZ);
-            g_pfVelocity[1] = g_pfVelocity[1] + g_pfInAcceleration[1]/((float) MOTION_SAMPLE_FREQ_HZ);
-            g_pfVelocity[2] = g_pfVelocity[2] + g_pfInAcceleration[2]/((float) MOTION_SAMPLE_FREQ_HZ);
-
-            //
-            // Use the barometer's computed altitude to compensate the accelerometer position
-            //
-            float fAltitude = calcAltitude(g_pfPressure);
-            g_pfBarometerPosition = fAltitude - g_pfBarometerOffset;
-            g_pfPosition[2] = 0.02f * (g_pfBarometerPosition) + 0.98f * (g_pfPosition[2] + 0.5* g_pfInAcceleration[2] /((float) MOTION_SAMPLE_FREQ_HZ) /((float) MOTION_SAMPLE_FREQ_HZ));
-
-            //
-            // Sensor calibration section
-            // Use the gravity-compensated acceleration to find the accelerometer offsets
-            // Also find the average accelerometer alititude so it can be subtracted later
-            // to get the change in altitude for heave measurement
-            //
-            if (g_ui8MotionState == MOTION_STATE_CALIBRATE) {
-            	// if we are calibrating, the accel vector should be all zeros
-            	// so add it to the running average
-            	// https://en.wikipedia.org/wiki/Moving_average#Cumulative_moving_average
-            	VectorRotateQuaternion(tVec2, g_pfAccelOffsets, pfBodyToInQuart);
-            	VectorScale(tVec1, tVec2, g_ui32AccelSampCount);
-            	VectorAdd(tVec1, g_pfInAcceleration, tVec1);
-            	g_ui32AccelSampCount++;
-            	VectorScale(tVec1, tVec1, (float) 1/g_ui32AccelSampCount);
-
-            	// now the offsets must be transformed back to the sensor frame
-            	VectorRotateQuaternion(g_pfAccelOffsets, tVec1, pfInToBodyQuart);
-
-            	//
-            	// Keep a running average of the barometer altitude
-            	//
-            	g_pfBarometerOffset = (fAltitude + (float) g_ui32BarometerSampCount * g_pfBarometerOffset) / ((float) g_ui32BarometerSampCount + 1.f);
-            	g_ui32BarometerSampCount++;
-            }
-
             // clear the data ready flag
 			HWREGBITW(&g_ui32Events, BAROMETER_EVENT) = 0;
 
+            //
+            // Update the filter. Do this in the ISR so that timing between the
+            // calls is consistent and accurate.
+            //
+            MadgwickAHRSupdate(-g_pfGyro[0], -g_pfGyro[1], -g_pfGyro[2],
+								g_pfAccel[0], g_pfAccel[1], g_pfAccel[2],
+								g_pfMag[0], g_pfMag[1], g_pfMag[2]);
 
             //
 			// Turn off the LED to show we are done processing motion data.
@@ -788,12 +691,24 @@ startCalibration(void)
 
 	g_ui32BarometerSampCount = 0;
 	g_pfBarometerOffset = 0.f;
+
+	beta = 10.f;
 }
 
 void
 stopCalibration(void)
 {
 	g_ui8MotionState = MOTION_STATE_INIT;
+
+	beta = 0.05f;
+}
+
+void quaternionToEuler(float q[4], float* roll, float* pitch, float* yaw)
+{
+	// https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
+	*pitch = atan2f(2*(q[0]*q[1] + q[2]*q[3]), 1-2*(q[1]*q[1] + q[2]*q[2]));
+	*roll = asinf(2*(q[0]*q[2] - q[3]*q[1]));
+	*yaw = atan2f(2*(q[0]*q[3] + q[1]*q[2]), 1-2*(q[2]*q[2] + q[3]*q[3]));
 }
 
 void
@@ -804,16 +719,16 @@ getIMUState(IMUState* state)
     // inside the interrupt routine to insure it is not skipped and
     // that the timing is consistent.
     //
-    CompDCMComputeEulers(&g_sCompDCMInst, g_pfEulers,
-                         g_pfEulers + 1, g_pfEulers + 2);
+	float q[4] = {q0, q1, q2, q3};
+    quaternionToEuler(q, &state->roll, &state->pitch, &state->yaw);
 
     state->x = g_pfAccel[2];
     state->y = g_pfBarometerPosition;
     state->z = g_pfPosition[2];
 
-	state->roll = TO_DEG(g_pfEulers[1]);
-	state->pitch = TO_DEG(g_pfEulers[0]);
-	state->yaw = TO_DEG(g_pfEulers[2]);
+	state->roll = TO_DEG(state->roll);
+	state->pitch = TO_DEG(state->pitch);
+	state->yaw = TO_DEG(state->yaw);
 }
 
 void
