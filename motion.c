@@ -718,7 +718,7 @@ MotionMain(void)
             //
             float fAltitude = calcAltitude(g_pfPressure);
             g_pfBarometerPosition = fAltitude - g_pfBarometerOffset;
-            g_pfPosition[2] = 0.02f * (g_pfBarometerPosition) + 0.98f * (g_pfPosition[2] + g_pfInAcceleration[2] /((float) MOTION_SAMPLE_FREQ_HZ) /((float) MOTION_SAMPLE_FREQ_HZ));
+            g_pfPosition[2] = 0.02f * (g_pfBarometerPosition) + 0.98f * (g_pfPosition[2] + 0.5* g_pfInAcceleration[2] /((float) MOTION_SAMPLE_FREQ_HZ) /((float) MOTION_SAMPLE_FREQ_HZ));
 
             //
             // Sensor calibration section
@@ -807,7 +807,7 @@ getIMUState(IMUState* state)
     CompDCMComputeEulers(&g_sCompDCMInst, g_pfEulers,
                          g_pfEulers + 1, g_pfEulers + 2);
 
-    state->x = g_pfTemperature;
+    state->x = g_pfAccel[2];
     state->y = g_pfBarometerPosition;
     state->z = g_pfPosition[2];
 
