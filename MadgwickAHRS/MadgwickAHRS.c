@@ -22,7 +22,7 @@
 // Definitions
 
 #define sampleFreq	50.0f		// sample frequency in Hz
-#define betaDef		0.04f		// 2 * proportional gain
+#define betaDef		0.1f		// 2 * proportional gain
 
 //---------------------------------------------------------------------------------------------------
 // Variable definitions
@@ -37,6 +37,11 @@ float invSqrt(float x);
 
 //====================================================================================================
 // Functions
+
+void MadgwickInit()
+{
+	q0 = 1.0f, q1 = 0.0f, q2 = 0.0f, q3 = 0.0f;
+}
 
 //---------------------------------------------------------------------------------------------------
 // AHRS algorithm update

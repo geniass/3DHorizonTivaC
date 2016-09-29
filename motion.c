@@ -108,7 +108,7 @@ float g_pfAccel[3];
 float g_pfGyro[3];
 float g_pfMag[3];
 
-float g_pfAccelOffsets[3];
+float g_pfGyroOffsets[3];
 uint32_t g_ui32AccelSampCount;
 
 float g_pfInAcceleration[3];
@@ -295,7 +295,11 @@ void MotionCallback(void* pvCallbackData, uint_fast8_t ui8Status)
             //
 			// Subtract the offsets computed during calibration
 			//
-			VectorSubtract(g_pfAccel, g_pfAccel, g_pfAccelOffsets);
+			VectorSubtract(g_pfGyro, g_pfGyro, g_pfGyroOffsets);
+
+			MadgwickAHRSupdate(-g_pfGyro[0], -g_pfGyro[1], -g_pfGyro[2],
+								g_pfAccel[0], g_pfAccel[1], g_pfAccel[2],
+								g_pfMag[0], g_pfMag[1], g_pfMag[2]);
 
             beginBarometerRead();
         }
@@ -585,6 +589,7 @@ MotionMain(void)
             //
             if(g_sMPU9150Inst.pui8Data[14] & AK8975_ST1_DRDY && HWREGBITW(&g_ui32Events, BAROMETER_EVENT))
             {
+            	/*
                 //
                 // Get local copy of Accel and Mag data to feed to the DCM
                 // start.
@@ -599,7 +604,8 @@ MotionMain(void)
                 //
 				// Subtract the offsets computed during calibration
 				//
-				VectorSubtract(g_pfAccel, g_pfAccel, g_pfAccelOffsets);
+				VectorSubtract(g_pfGyro, g_pfGyro, g_pfGyroOffsets);
+				*/
 
 				// Reset the vertical position after calibration because its probably in error
 				g_pfPosition[2] = 0;
@@ -610,9 +616,11 @@ MotionMain(void)
                 // the floating point magneto data is already in the local
                 // data buffer.
                 //
+				/*
                 MadgwickAHRSupdate(-g_pfGyro[0], -g_pfGyro[1], -g_pfGyro[2],
 									g_pfAccel[0], g_pfAccel[1], g_pfAccel[2],
 									g_pfMag[0], g_pfMag[1], g_pfMag[2]);
+									*/
 
 				// clear the data ready flag
 				HWREGBITW(&g_ui32Events, BAROMETER_EVENT) = 0;
@@ -645,13 +653,26 @@ MotionMain(void)
             // clear the data ready flag
 			HWREGBITW(&g_ui32Events, BAROMETER_EVENT) = 0;
 
+			if (g_ui8MotionState == MOTION_STATE_CALIBRATE) {
+				// if we are calibrating, the accel vector should be all zeros
+				// so add it to the running average
+				// https://en.wikipedia.org/wiki/Moving_average#Cumulative_moving_average
+				float tVec1[3];
+				VectorScale(tVec1, g_pfGyroOffsets, g_ui32AccelSampCount);
+				VectorAdd(tVec1, g_pfGyro, tVec1);
+				g_ui32AccelSampCount++;
+				VectorScale(g_pfGyroOffsets, tVec1, (float) 1/g_ui32AccelSampCount);
+			}
+
             //
             // Update the filter. Do this in the ISR so that timing between the
             // calls is consistent and accurate.
             //
+			/*
             MadgwickAHRSupdate(-g_pfGyro[0], -g_pfGyro[1], -g_pfGyro[2],
 								g_pfAccel[0], g_pfAccel[1], g_pfAccel[2],
 								g_pfMag[0], g_pfMag[1], g_pfMag[2]);
+								*/
 
             //
 			// Turn off the LED to show we are done processing motion data.
@@ -685,14 +706,15 @@ startCalibration(void)
 {
 	g_ui8MotionState = MOTION_STATE_CALIBRATE;
 	g_ui32AccelSampCount = 0;
-	g_pfAccelOffsets[0] = 0.f;
-	g_pfAccelOffsets[1] = 0.f;
-	g_pfAccelOffsets[2] = 0.f;
+	g_pfGyroOffsets[0] = 0.f;
+	g_pfGyroOffsets[1] = 0.f;
+	g_pfGyroOffsets[2] = 0.f;
 
 	g_ui32BarometerSampCount = 0;
 	g_pfBarometerOffset = 0.f;
 
-	beta = 10.f;
+	beta = 5.f;
+	MadgwickInit();
 }
 
 void
@@ -700,7 +722,7 @@ stopCalibration(void)
 {
 	g_ui8MotionState = MOTION_STATE_INIT;
 
-	beta = 0.05f;
+	beta = 0.1f;
 }
 
 void quaternionToEuler(float q[4], float* roll, float* pitch, float* yaw)
