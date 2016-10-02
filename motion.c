@@ -48,6 +48,7 @@
 #include "drivers/rgb.h"
 #include "events.h"
 #include "motion.h"
+#include "filter/HeaveFilter.h"
 
 //*****************************************************************************
 //
@@ -109,9 +110,12 @@ float g_pfGyro[3];
 float g_pfMag[3];
 
 float g_pfGyroOffsets[3];
+uint32_t g_ui32GyroSampCount;
+float g_pfAccelOffsets[3];
 uint32_t g_ui32AccelSampCount;
 
 float g_pfInAcceleration[3];
+float g_pfFiltAccel[3];
 float g_pfVelocity[3];
 float g_pfPosition[3];
 
@@ -120,6 +124,10 @@ float g_pfPressure;
 float g_pfBarometerPosition;
 float g_pfBarometerOffset;
 uint32_t g_ui32BarometerSampCount;
+
+HeaveFilter g_sHeaveFilter;
+HeaveFilter g_sAccelXFilter;
+HeaveFilter g_sAccelYFilter;
 
 //*****************************************************************************
 //
@@ -292,16 +300,21 @@ void MotionCallback(void* pvCallbackData, uint_fast8_t ui8Status)
             MPU9150DataMagnetoGetFloat(&g_sMPU9150Inst, g_pfMag, g_pfMag + 1,
                                        g_pfMag + 2);
 
-            //
-			// Subtract the offsets computed during calibration
-			//
-			VectorSubtract(g_pfGyro, g_pfGyro, g_pfGyroOffsets);
+			// Filter the heave acceleration. Maybe move outside interrupt
+			HeaveFilter_put(&g_sHeaveFilter, g_pfAccel[2]);
+			g_pfFiltAccel[2] = HeaveFilter_get(&g_sHeaveFilter);
 
-			MadgwickAHRSupdate(-g_pfGyro[0], -g_pfGyro[1], -g_pfGyro[2],
-								g_pfAccel[0], g_pfAccel[1], g_pfAccel[2],
-								g_pfMag[0], g_pfMag[1], g_pfMag[2]);
+			HeaveFilter_put(&g_sAccelXFilter, g_pfAccel[0]);
+			g_pfFiltAccel[0] = HeaveFilter_get(&g_sAccelXFilter);
 
-            beginBarometerRead();
+			HeaveFilter_put(&g_sAccelYFilter, g_pfAccel[1]);
+			g_pfFiltAccel[1] = HeaveFilter_get(&g_sAccelYFilter);
+
+			MadgwickAHRSupdate(g_pfGyro[0], g_pfGyro[1], g_pfGyro[2],
+					g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2],
+							   g_pfMag[0], g_pfMag[1], g_pfMag[2]);
+
+//            beginBarometerRead();
         }
     }
     else
@@ -518,11 +531,11 @@ MotionInit(void)
     // and sensor range settings.
     //MPU9150_CONFIG_DLPF_CFG_44_42
     // MPU9150_CONFIG_DLPF_CFG_94_98
-    g_sMPU9150Inst.pui8Data[0] = MPU9150_CONFIG_DLPF_CFG_5_5;
-    g_sMPU9150Inst.pui8Data[1] = MPU9150_GYRO_CONFIG_FS_SEL_250;
-    g_sMPU9150Inst.pui8Data[2] = (MPU9150_ACCEL_CONFIG_ACCEL_HPF_5HZ |
+//    g_sMPU9150Inst.pui8Data[0] = MPU9150_CONFIG_DLPF_CFG_5_5;
+    g_sMPU9150Inst.pui8Data[0] = MPU9150_GYRO_CONFIG_FS_SEL_250;
+    g_sMPU9150Inst.pui8Data[1] = (MPU9150_ACCEL_CONFIG_ACCEL_HPF_RESET |
                                   MPU9150_ACCEL_CONFIG_AFS_SEL_2G);
-    MPU9150Write(&g_sMPU9150Inst, MPU9150_O_CONFIG, g_sMPU9150Inst.pui8Data, 3,
+    MPU9150Write(&g_sMPU9150Inst, MPU9150_O_GYRO_CONFIG, g_sMPU9150Inst.pui8Data, 3,
                  MotionCallback, &g_sMPU9150Inst);
 
     //
@@ -545,6 +558,17 @@ MotionInit(void)
     //
     MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
 
+    g_sMPU9150Inst.pui8Data[0] = MPU9150_CONFIG_DLPF_CFG_5_5;
+	MPU9150Write(&g_sMPU9150Inst, MPU9150_O_CONFIG, g_sMPU9150Inst.pui8Data, 1,
+				 MotionCallback, &g_sMPU9150Inst);
+	MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
+
+	g_sMPU9150Inst.pui8Data[0] = 0;
+	MPU9150Read(&g_sMPU9150Inst, MPU9150_O_CONFIG, g_sMPU9150Inst.pui8Data, 1,
+			MotionCallback, &g_sMPU9150Inst);
+	MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
+	UARTprintf("DLPF: %d\n", g_sMPU9150Inst.pui8Data[0]);
+
     //
 	// Initialize the BMP180.
 	//
@@ -559,6 +583,10 @@ MotionInit(void)
 							~BMP180_CTRL_MEAS_OSS_M, BMP180_CTRL_MEAS_OSS_8,
 							BMP180Callback, 0);
 	MotionI2CWait(BAROMETER_EVENT, __FILE__, __LINE__);
+
+	HeaveFilter_init(&g_sHeaveFilter);
+	HeaveFilter_init(&g_sAccelXFilter);
+	HeaveFilter_init(&g_sAccelYFilter);
 
     // Init is now done
     g_pui32RGBColors[RED] = 0x0;
@@ -587,7 +615,7 @@ MotionMain(void)
             // for the first few data captures.
         	// Also check if the barometer has data ready
             //
-            if(g_sMPU9150Inst.pui8Data[14] & AK8975_ST1_DRDY && HWREGBITW(&g_ui32Events, BAROMETER_EVENT))
+            if(g_sMPU9150Inst.pui8Data[14] & AK8975_ST1_DRDY)// && HWREGBITW(&g_ui32Events, BAROMETER_EVENT))
             {
             	/*
                 //
@@ -656,13 +684,18 @@ MotionMain(void)
 			if (g_ui8MotionState == MOTION_STATE_CALIBRATE) {
 				// if we are calibrating, the accel vector should be all zeros
 				// so add it to the running average
-				// https://en.wikipedia.org/wiki/Moving_average#Cumulative_moving_average
-				float tVec1[3];
-				VectorScale(tVec1, g_pfGyroOffsets, g_ui32AccelSampCount);
-				VectorAdd(tVec1, g_pfGyro, tVec1);
+				VectorAdd(g_pfGyroOffsets, g_pfGyroOffsets, g_pfGyro);
+				g_ui32GyroSampCount++;
+
+				VectorAdd(g_pfAccelOffsets, g_pfAccelOffsets, g_pfAccel);
 				g_ui32AccelSampCount++;
-				VectorScale(g_pfGyroOffsets, tVec1, (float) 1/g_ui32AccelSampCount);
 			}
+
+            //
+			// Subtract the offsets computed during calibration
+			//
+			VectorSubtract(g_pfGyro, g_pfGyro, g_pfGyroOffsets);
+			VectorSubtract(g_pfAccel, g_pfAccel, g_pfAccelOffsets);
 
             //
             // Update the filter. Do this in the ISR so that timing between the
@@ -705,15 +738,20 @@ void
 startCalibration(void)
 {
 	g_ui8MotionState = MOTION_STATE_CALIBRATE;
-	g_ui32AccelSampCount = 0;
+	g_ui32GyroSampCount = 0;
 	g_pfGyroOffsets[0] = 0.f;
 	g_pfGyroOffsets[1] = 0.f;
 	g_pfGyroOffsets[2] = 0.f;
 
+	g_ui32AccelSampCount = 0;
+	g_pfAccelOffsets[0] = 0.f;
+	g_pfAccelOffsets[1] = 0.f;
+	g_pfAccelOffsets[2] = 0.f;
+
 	g_ui32BarometerSampCount = 0;
 	g_pfBarometerOffset = 0.f;
 
-	beta = 5.f;
+	beta = 10.f;
 	MadgwickInit();
 }
 
@@ -721,6 +759,9 @@ void
 stopCalibration(void)
 {
 	g_ui8MotionState = MOTION_STATE_INIT;
+
+	VectorScale(g_pfGyroOffsets, g_pfGyroOffsets, (1.f / (float) g_ui32GyroSampCount));
+	VectorScale(g_pfAccelOffsets, g_pfAccelOffsets, (1.f / (float) g_ui32AccelSampCount));
 
 	beta = 0.1f;
 }
@@ -744,9 +785,9 @@ getIMUState(IMUState* state)
 	float q[4] = {q0, q1, q2, q3};
     quaternionToEuler(q, &state->roll, &state->pitch, &state->yaw);
 
-    state->x = g_pfAccel[2];
-    state->y = g_pfBarometerPosition;
-    state->z = g_pfPosition[2];
+    state->x = g_pfGyro[0];
+    state->y = g_pfGyro[1];
+    state->z = g_pfGyro[2];
 
 	state->roll = TO_DEG(state->roll);
 	state->pitch = TO_DEG(state->pitch);

@@ -12,7 +12,7 @@
 // Fractional part multiplier = 10^{E}
 // where E is the num of desired decimal places
 //
-#define FLOAT_FRAC_MULTIPLIER	100
+#define FLOAT_FRAC_MULTIPLIER	10000
 
 void sendIMUData(void);
 
