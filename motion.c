@@ -37,31 +37,17 @@
 #include "utils/uartstdio.h"
 #include "sensorlib/hw_mpu9150.h"
 #include "sensorlib/hw_ak8975.h"
-#include "sensorlib/hw_bmp180.h"
 #include "sensorlib/i2cm_drv.h"
 #include "sensorlib/ak8975.h"
 #include "sensorlib/mpu9150.h"
-#include "MadgwickAHRS/MadgwickAHRS.h"
-#include "sensorlib/bmp180.h"
 #include "sensorlib/quaternion.h"
 #include "sensorlib/vector.h"
 #include "drivers/rgb.h"
 #include "events.h"
 #include "motion.h"
 #include "filter/HeaveFilter.h"
+#include "MadgwickAHRS/MadgwickAHRS.h"
 
-//*****************************************************************************
-//
-// Global array that contains the colors of the RGB.  Motion is assigned the
-// GREEN LED and should only modify GREEN.
-//
-// fast steady blink means I2C bus error.  Power cycle to clear.  usually
-// caused by a reset of the system during an I2C transaction causing the slave
-// to hold the bus.
-//
-// quick and brief blinks also occur on each motion system update.
-//
-//*****************************************************************************
 extern volatile uint32_t g_pui32RGBColors[3];
 
 //*****************************************************************************
@@ -101,6 +87,13 @@ volatile uint_fast8_t g_vui8ErrorFlag;
 
 //*****************************************************************************
 //
+// Counter to keep tracj of initialization progress
+//
+//*****************************************************************************
+uint32_t g_ui32CalibrationCounter;
+
+//*****************************************************************************
+//
 // Global storage for most recent Euler angles and Sensor Data
 //
 //*****************************************************************************
@@ -116,25 +109,10 @@ uint32_t g_ui32AccelSampCount;
 
 float g_pfInAcceleration[3];
 float g_pfFiltAccel[3];
-float g_pfVelocity[3];
-float g_pfPosition[3];
-
-float g_pfTemperature;
-float g_pfPressure;
-float g_pfBarometerPosition;
-float g_pfBarometerOffset;
-uint32_t g_ui32BarometerSampCount;
 
 HeaveFilter g_sHeaveFilter;
 HeaveFilter g_sAccelXFilter;
 HeaveFilter g_sAccelYFilter;
-
-//*****************************************************************************
-//
-// Global instance structure for the BMP180 sensor driver.
-//
-//*****************************************************************************
-tBMP180 g_sBMP180Inst;
 
 //*****************************************************************************
 //
@@ -228,42 +206,6 @@ VectorRotateQuaternion(float pfVectorOut[3], float pfVectorIn[3],
 	VectorAdd(pfVectorOut, pfVectorIn, tVec2);	// v + 2r x (r x v + w v)
 }
 
-//*****************************************************************************
-//
-// Calculates the altitude using the measured pressure
-//
-//*****************************************************************************
-float calcAltitude(float fPressure)
-{
-	return 44330.0f * (1.0f - powf(fPressure / 101325.0f, 1.0f / 5.255f));
-}
-
-//*****************************************************************************
-//
-// BMP180 Sensor callback function.  Called at the end of BMP180 sensor driver
-// transactions. This is called from I2C interrupt context.
-//
-//*****************************************************************************
-void BMP180Callback(void* pvCallbackData, uint_fast8_t ui8Status)
-{
-    if(ui8Status == I2CM_STATUS_SUCCESS)
-    {
-    	// Barometer data is ready
-    	HWREGBITW(&g_ui32Events, BAROMETER_EVENT) = 1;
-
-    	//
-		// Get a local copy of the latest temperature data in float format.
-		//
-		BMP180DataTemperatureGetFloat(&g_sBMP180Inst, &g_pfTemperature);
-
-		//
-		// Get a local copy of the latest air pressure data in float format.
-		//
-		BMP180DataPressureGetFloat(&g_sBMP180Inst, &g_pfPressure);
-    }
-}
-
-
 
 //*****************************************************************************
 //
@@ -284,38 +226,6 @@ void MotionCallback(void* pvCallbackData, uint_fast8_t ui8Status)
         // i2c transfer
         //
         HWREGBITW(&g_ui32Events, MOTION_EVENT) = 1;
-
-
-        if(g_ui8MotionState == MOTION_STATE_RUN || g_ui8MotionState == MOTION_STATE_CALIBRATE);
-        {
-            //
-            // Get local copies of the raw motion sensor data.
-            //
-            MPU9150DataAccelGetFloat(&g_sMPU9150Inst, g_pfAccel, g_pfAccel + 1,
-                                     g_pfAccel + 2);
-
-            MPU9150DataGyroGetFloat(&g_sMPU9150Inst, g_pfGyro, g_pfGyro + 1,
-                                    g_pfGyro + 2);
-
-            MPU9150DataMagnetoGetFloat(&g_sMPU9150Inst, g_pfMag, g_pfMag + 1,
-                                       g_pfMag + 2);
-
-			// Filter the heave acceleration. Maybe move outside interrupt
-			HeaveFilter_put(&g_sHeaveFilter, g_pfAccel[2]);
-			g_pfFiltAccel[2] = HeaveFilter_get(&g_sHeaveFilter);
-
-			HeaveFilter_put(&g_sAccelXFilter, g_pfAccel[0]);
-			g_pfFiltAccel[0] = HeaveFilter_get(&g_sAccelXFilter);
-
-			HeaveFilter_put(&g_sAccelYFilter, g_pfAccel[1]);
-			g_pfFiltAccel[1] = HeaveFilter_get(&g_sAccelYFilter);
-
-			MadgwickAHRSupdate(g_pfGyro[0], g_pfGyro[1], g_pfGyro[2],
-					g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2],
-							   g_pfMag[0], g_pfMag[1], g_pfMag[2]);
-
-//            beginBarometerRead();
-        }
     }
     else
     {
@@ -495,14 +405,6 @@ MotionInit(void)
     //
     // Init to zero
     //
-    g_pfPosition[0] = 0.f;
-    g_pfPosition[1] = 0.f;
-    g_pfPosition[2] = 0.f;
-
-    g_pfVelocity[0] = 0.f;
-    g_pfVelocity[1] = 0.f;
-    g_pfVelocity[2] = 0.f;
-
 	g_pfInAcceleration[0] = 0.f;
 	g_pfInAcceleration[1] = 0.f;
 	g_pfInAcceleration[2] = 0.f;
@@ -529,18 +431,12 @@ MotionInit(void)
     //
     // Write application specific sensor configuration such as filter settings
     // and sensor range settings.
-    //MPU9150_CONFIG_DLPF_CFG_44_42
-    // MPU9150_CONFIG_DLPF_CFG_94_98
-//    g_sMPU9150Inst.pui8Data[0] = MPU9150_CONFIG_DLPF_CFG_5_5;
-    g_sMPU9150Inst.pui8Data[0] = MPU9150_GYRO_CONFIG_FS_SEL_250;
-    g_sMPU9150Inst.pui8Data[1] = (MPU9150_ACCEL_CONFIG_ACCEL_HPF_RESET |
+    g_sMPU9150Inst.pui8Data[0] = MPU9150_CONFIG_DLPF_CFG_5_5;
+    g_sMPU9150Inst.pui8Data[1] = MPU9150_GYRO_CONFIG_FS_SEL_250;
+    g_sMPU9150Inst.pui8Data[2] = (MPU9150_ACCEL_CONFIG_ACCEL_HPF_RESET |
                                   MPU9150_ACCEL_CONFIG_AFS_SEL_2G);
-    MPU9150Write(&g_sMPU9150Inst, MPU9150_O_GYRO_CONFIG, g_sMPU9150Inst.pui8Data, 3,
+    MPU9150Write(&g_sMPU9150Inst, MPU9150_O_CONFIG, g_sMPU9150Inst.pui8Data, 3,
                  MotionCallback, &g_sMPU9150Inst);
-
-    //
-    // Wait for transaction to complete
-    //
     MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
 
     //
@@ -552,16 +448,7 @@ MotionInit(void)
     g_sMPU9150Inst.pui8Data[1] = MPU9150_INT_ENABLE_DATA_RDY_EN;
     MPU9150Write(&g_sMPU9150Inst, MPU9150_O_INT_PIN_CFG,
                  g_sMPU9150Inst.pui8Data, 2, MotionCallback, &g_sMPU9150Inst);
-
-    //
-    // Wait for transaction to complete
-    //
     MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
-
-    g_sMPU9150Inst.pui8Data[0] = MPU9150_CONFIG_DLPF_CFG_5_5;
-	MPU9150Write(&g_sMPU9150Inst, MPU9150_O_CONFIG, g_sMPU9150Inst.pui8Data, 1,
-				 MotionCallback, &g_sMPU9150Inst);
-	MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
 
 	g_sMPU9150Inst.pui8Data[0] = 0;
 	MPU9150Read(&g_sMPU9150Inst, MPU9150_O_CONFIG, g_sMPU9150Inst.pui8Data, 1,
@@ -569,24 +456,11 @@ MotionInit(void)
 	MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
 	UARTprintf("DLPF: %d\n", g_sMPU9150Inst.pui8Data[0]);
 
-    //
-	// Initialize the BMP180.
-	//
-	BMP180Init(&g_sBMP180Inst, &g_sI2CInst, BMP180_I2C_ADDRESS,
-			   BMP180Callback, &g_sBMP180Inst);
-	MotionI2CWait(BAROMETER_EVENT, __FILE__, __LINE__);
-
-	//
-	// Enable 8x oversampling for high resolution
-	//
-	BMP180ReadModifyWrite(&g_sBMP180Inst, BMP180_O_CTRL_MEAS,
-							~BMP180_CTRL_MEAS_OSS_M, BMP180_CTRL_MEAS_OSS_8,
-							BMP180Callback, 0);
-	MotionI2CWait(BAROMETER_EVENT, __FILE__, __LINE__);
-
 	HeaveFilter_init(&g_sHeaveFilter);
 	HeaveFilter_init(&g_sAccelXFilter);
 	HeaveFilter_init(&g_sAccelYFilter);
+
+	MadgwickInit((float) MOTION_SAMPLE_FREQ_HZ, MADGWICK_BETA_INIT);
 
     // Init is now done
     g_pui32RGBColors[RED] = 0x0;
@@ -602,120 +476,98 @@ MotionInit(void)
 void
 MotionMain(void)
 {
+	//
+	// Get local copy of Accel and Mag data to feed to the filter
+	//
+	MPU9150DataAccelGetFloat(&g_sMPU9150Inst, g_pfAccel,
+							 g_pfAccel + 1, g_pfAccel + 2);
+	MPU9150DataMagnetoGetFloat(&g_sMPU9150Inst, g_pfMag,
+							  g_pfMag + 1, g_pfMag + 2);
+	MPU9150DataGyroGetFloat(&g_sMPU9150Inst, g_pfGyro,
+							g_pfGyro + 1, g_pfGyro + 2);
+
+	// Filter the heave acceleration. Maybe move outside interrupt
+	HeaveFilter_put(&g_sHeaveFilter, g_pfAccel[2]);
+	g_pfFiltAccel[2] = HeaveFilter_get(&g_sHeaveFilter);
+
+	HeaveFilter_put(&g_sAccelXFilter, g_pfAccel[0]);
+	g_pfFiltAccel[0] = HeaveFilter_get(&g_sAccelXFilter);
+
+	HeaveFilter_put(&g_sAccelYFilter, g_pfAccel[1]);
+	g_pfFiltAccel[1] = HeaveFilter_get(&g_sAccelYFilter);
+
+	//
+	// Subtract the offsets computed during calibration
+	//
+	VectorSubtract(g_pfGyro, g_pfGyro, g_pfGyroOffsets);
+	VectorSubtract(g_pfAccel, g_pfAccel, g_pfAccelOffsets);
+
     switch(g_ui8MotionState)
     {
         //
-        // This is our initial data set from the MPU9150, start the DCM.
+        // This is our initial data set from the MPU9150, start the filters.
         //
         case MOTION_STATE_INIT:
         {
+        	g_pui32RGBColors[BLUE] = 0xFFFF;
+			RGBColorSet(g_pui32RGBColors);
+
             //
             // Check the read data buffer of the MPU9150 to see if the
             // Magnetometer data is ready and present. This may not be the case
             // for the first few data captures.
-        	// Also check if the barometer has data ready
             //
-            if(g_sMPU9150Inst.pui8Data[14] & AK8975_ST1_DRDY)// && HWREGBITW(&g_ui32Events, BAROMETER_EVENT))
+            if(g_sMPU9150Inst.pui8Data[14] & AK8975_ST1_DRDY)
             {
-            	/*
                 //
-                // Get local copy of Accel and Mag data to feed to the DCM
-                // start.
+                // Proceed to the run state after a certain number of samples
+            	// with high beta gain to ensure convergence
                 //
-                MPU9150DataAccelGetFloat(&g_sMPU9150Inst, g_pfAccel,
-                                         g_pfAccel + 1, g_pfAccel + 2);
-                MPU9150DataMagnetoGetFloat(&g_sMPU9150Inst, g_pfMag,
-                                          g_pfMag + 1, g_pfMag + 2);
-                MPU9150DataGyroGetFloat(&g_sMPU9150Inst, g_pfGyro,
-                                        g_pfGyro + 1, g_pfGyro + 2);
+            	if (++g_ui32CalibrationCounter < 1000) {
+					// high gain for initial convergence
+					MadgwickSetGain(MADGWICK_BETA_INIT);
+				} else {
+					MadgwickSetGain(MADGWICK_BETA_STEADY);
+					g_ui8MotionState = MOTION_STATE_RUN;
 
-                //
-				// Subtract the offsets computed during calibration
-				//
-				VectorSubtract(g_pfGyro, g_pfGyro, g_pfGyroOffsets);
-				*/
-
-				// Reset the vertical position after calibration because its probably in error
-				g_pfPosition[2] = 0;
-
-                //
-                // Feed the initial measurements to the DCM and start it.
-                // Due to the structure of our MotionMagCallback function,
-                // the floating point magneto data is already in the local
-                // data buffer.
-                //
-				/*
-                MadgwickAHRSupdate(-g_pfGyro[0], -g_pfGyro[1], -g_pfGyro[2],
-									g_pfAccel[0], g_pfAccel[1], g_pfAccel[2],
-									g_pfMag[0], g_pfMag[1], g_pfMag[2]);
-									*/
-
-				// clear the data ready flag
-				HWREGBITW(&g_ui32Events, BAROMETER_EVENT) = 0;
-
-                //
-                // Proceed to the run state.
-                //
-                g_ui8MotionState = MOTION_STATE_RUN;
+					g_pui32RGBColors[BLUE] = 0x0;
+					RGBColorSet(g_pui32RGBColors);
+				}
             }
 
-            //
-            // Finished
-            //
+            MadgwickAHRSupdate(g_pfGyro[0], g_pfGyro[1], g_pfGyro[2],
+            					g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2],
+								g_pfMag[0], g_pfMag[1], g_pfMag[2]);
+
             break;
         }
 
-        // calibrate is a special case of RUN
-        case MOTION_STATE_CALIBRATE: {}
+        case MOTION_STATE_CALIBRATE:
+        {
+        	//
+        	// add current measurements to a sum for later averaging
+        	//
+			VectorAdd(g_pfGyroOffsets, g_pfGyroOffsets, g_pfGyro);
+			g_ui32GyroSampCount++;
+
+			VectorAdd(g_pfAccelOffsets, g_pfAccelOffsets, g_pfAccel);
+			g_ui32AccelSampCount++;
+
+			break;
+        }
+
         //
-        // DCM has been started and we are ready for normal operations.
+        // filter has been started and we are ready for normal operations.
         //
         case MOTION_STATE_RUN:
         {
             //
-			// Turn on the LED to show we are processing motion data.
-			//
-			g_pui32RGBColors[MOTION_LED(MOTION_STATE_RUN)] = 0xFFFF;
-			RGBColorSet(g_pui32RGBColors);
-
-            // clear the data ready flag
-			HWREGBITW(&g_ui32Events, BAROMETER_EVENT) = 0;
-
-			if (g_ui8MotionState == MOTION_STATE_CALIBRATE) {
-				// if we are calibrating, the accel vector should be all zeros
-				// so add it to the running average
-				VectorAdd(g_pfGyroOffsets, g_pfGyroOffsets, g_pfGyro);
-				g_ui32GyroSampCount++;
-
-				VectorAdd(g_pfAccelOffsets, g_pfAccelOffsets, g_pfAccel);
-				g_ui32AccelSampCount++;
-			}
-
+            // Update the filter
             //
-			// Subtract the offsets computed during calibration
-			//
-			VectorSubtract(g_pfGyro, g_pfGyro, g_pfGyroOffsets);
-			VectorSubtract(g_pfAccel, g_pfAccel, g_pfAccelOffsets);
-
-            //
-            // Update the filter. Do this in the ISR so that timing between the
-            // calls is consistent and accurate.
-            //
-			/*
-            MadgwickAHRSupdate(-g_pfGyro[0], -g_pfGyro[1], -g_pfGyro[2],
-								g_pfAccel[0], g_pfAccel[1], g_pfAccel[2],
+            MadgwickAHRSupdate(g_pfGyro[0], g_pfGyro[1], g_pfGyro[2],
+            					g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2],
 								g_pfMag[0], g_pfMag[1], g_pfMag[2]);
-								*/
 
-            //
-			// Turn off the LED to show we are done processing motion data.
-			//
-			g_pui32RGBColors[MOTION_LED(MOTION_STATE_RUN)] = 0;
-			RGBColorSet(g_pui32RGBColors);
-
-            //
-            // Finished
-            //
             break;
         }
 
@@ -748,11 +600,7 @@ startCalibration(void)
 	g_pfAccelOffsets[1] = 0.f;
 	g_pfAccelOffsets[2] = 0.f;
 
-	g_ui32BarometerSampCount = 0;
-	g_pfBarometerOffset = 0.f;
-
-	beta = 10.f;
-	MadgwickInit();
+	MadgwickInit((float) MOTION_SAMPLE_FREQ_HZ, MADGWICK_BETA_INIT);
 }
 
 void
@@ -760,42 +608,21 @@ stopCalibration(void)
 {
 	g_ui8MotionState = MOTION_STATE_INIT;
 
+	//
+	// Compute average measurement offsets
+	//
 	VectorScale(g_pfGyroOffsets, g_pfGyroOffsets, (1.f / (float) g_ui32GyroSampCount));
 	VectorScale(g_pfAccelOffsets, g_pfAccelOffsets, (1.f / (float) g_ui32AccelSampCount));
 
-	beta = 0.1f;
-}
-
-void quaternionToEuler(float q[4], float* roll, float* pitch, float* yaw)
-{
-	// https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
-	*pitch = atan2f(2*(q[0]*q[1] + q[2]*q[3]), 1-2*(q[1]*q[1] + q[2]*q[2]));
-	*roll = asinf(2*(q[0]*q[2] - q[3]*q[1]));
-	*yaw = atan2f(2*(q[0]*q[3] + q[1]*q[2]), 1-2*(q[2]*q[2] + q[3]*q[3]));
+	MadgwickSetGain(MADGWICK_BETA_STEADY);
 }
 
 void
 getIMUState(IMUState* state)
 {
-    //
-    // Get the latest Euler data from the DCM. DCMUpdate is done
-    // inside the interrupt routine to insure it is not skipped and
-    // that the timing is consistent.
-    //
-	float q[4] = {q0, q1, q2, q3};
-    quaternionToEuler(q, &state->roll, &state->pitch, &state->yaw);
+	MadgwickAHRSGetEulers(&state->pitch, &state->roll, &state->yaw);
 
-    state->x = g_pfGyro[0];
-    state->y = g_pfGyro[1];
-    state->z = g_pfGyro[2];
-
-	state->roll = TO_DEG(state->roll);
-	state->pitch = TO_DEG(state->pitch);
-	state->yaw = TO_DEG(state->yaw);
-}
-
-void
-beginBarometerRead()
-{
-	BMP180DataRead(&g_sBMP180Inst, BMP180Callback, &g_sBMP180Inst);
+    state->x = g_pfFiltAccel[1];
+    state->y = g_pfAccel[1];
+    state->z = g_pfFiltAccel[2];
 }

@@ -261,7 +261,7 @@ main(void)
 		if (HWREGBITW(&g_ui32Events, CALIBRATION) == 1) {
 			// wait for calibration period to end
 			if (g_ui32SysTickCount
-					> g_ui32CalibrationTickCount + SYSTICKS_PER_SECOND * 30.f) {
+					> g_ui32CalibrationTickCount + SYSTICKS_PER_SECOND * 10.f) {
 				// end of calibration
 				HWREGBITW(&g_ui32Events, CALIBRATION) = 0;
 				g_ui32CalibrationTickCount = g_ui32SysTickCount;

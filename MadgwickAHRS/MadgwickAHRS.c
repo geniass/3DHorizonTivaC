@@ -16,19 +16,20 @@
 // Header files
 
 #include "MadgwickAHRS.h"
+
 #include <math.h>
 
 //---------------------------------------------------------------------------------------------------
 // Definitions
 
-#define sampleFreq	50.0f		// sample frequency in Hz
-#define betaDef		0.1f		// 2 * proportional gain
+#define RAD2DEG		57.295779513082320876798154814105f
 
 //---------------------------------------------------------------------------------------------------
 // Variable definitions
 
-volatile float beta = betaDef;								// 2 * proportional gain (Kp)
-volatile float q0 = 1.0f, q1 = 0.0f, q2 = 0.0f, q3 = 0.0f;	// quaternion of sensor frame relative to auxiliary frame
+static float sampleFreq;
+static volatile float beta;								// 2 * proportional gain (Kp)
+static volatile float q0 = 1.0f, q1 = 0.0f, q2 = 0.0f, q3 = 0.0f;	// quaternion of sensor frame relative to auxiliary frame
 
 //---------------------------------------------------------------------------------------------------
 // Function declarations
@@ -38,9 +39,16 @@ float invSqrt(float x);
 //====================================================================================================
 // Functions
 
-void MadgwickInit()
+void MadgwickInit(float sampleRate, float b)
 {
 	q0 = 1.0f, q1 = 0.0f, q2 = 0.0f, q3 = 0.0f;
+	sampleFreq = sampleRate;
+	beta = b;
+}
+
+void MadgwickSetGain(float b)
+{
+	beta = b;
 }
 
 //---------------------------------------------------------------------------------------------------
@@ -225,6 +233,23 @@ float invSqrt(float x) {
 	y = *(float*)&i;
 	y = y * (1.5f - (halfx * y * y));
 	return y;
+}
+
+void MadgwickAHRSGetEulers(float* roll, float* pitch, float* yaw)
+{
+	float ysqr = q2 * q2;
+	float t0 = -2.0f * (ysqr + q3 * q3) + 1.0f;
+	float t1 = +2.0f * (q1 * q2 + q0 * q3);
+	float t2 = -2.0f * (q1 * q3 - q0 * q2);
+	float t3 = +2.0f * (q2 * q3 + q0 * q1);
+	float t4 = -2.0f * (q1 * q1 + ysqr) + 1.0f;
+
+	t2 = t2 > 1.0f ? 1.0f : t2;
+	t2 = t2 < -1.0f ? -1.0f : t2;
+
+	*pitch = asinf(t2) * RAD2DEG;
+	*roll = atan2f(t3, t4) * RAD2DEG;
+	*yaw = atan2f(t1, t0) * RAD2DEG;
 }
 
 //====================================================================================================
