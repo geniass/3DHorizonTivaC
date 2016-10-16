@@ -50,7 +50,7 @@ extern "C"
 //*****************************************************************************
 #define MOTION_SAMPLE_FREQ_HZ   50
 
-#define MADGWICK_BETA_INIT		10.f
+#define MADGWICK_BETA_INIT		1.f
 #define MADGWICK_BETA_STEADY	0.1f
 
 //*****************************************************************************
