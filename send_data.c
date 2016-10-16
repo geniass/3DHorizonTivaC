@@ -18,18 +18,9 @@
 #include "events.h"
 #include "motion.h"
 #include "utils/uartstdio.h"
+#include <string.h>
 
 #include "send_data.h"
-
-void
-float_to_ints(int32_t *integer, uint32_t *fractional, float f)
-{
-	// truncate fractional part to get just integer part
-	*integer = (int32_t) f;
-	// get fractional part by multiplying and removing integer part
-	*fractional = ((uint32_t) abs(f * FLOAT_FRAC_MULTIPLIER));
-	*fractional -= ((uint32_t) abs(*integer) * FLOAT_FRAC_MULTIPLIER);
-}
 
 void
 sendIMUData(void)
@@ -37,21 +28,17 @@ sendIMUData(void)
     IMUState state;
     getIMUState(&state);
 
-    int32_t i32X_int, i32Y_int, i32Z_int, i32RX_int, i32RY_int, i32RZ_int;
-    uint32_t ui32X_frac, ui32Y_frac, ui32Z_frac, ui32RX_frac, ui32RY_frac, ui32RZ_frac;
+    char strX[16], strY[16], strZ[16];
+    char strRX[16], strRY[16], strRZ[16];
 
-    float_to_ints(&i32X_int, &ui32X_frac, state.x);
-    float_to_ints(&i32Y_int, &ui32Y_frac, state.y);
-    float_to_ints(&i32Z_int, &ui32Z_frac, state.z);
-    float_to_ints(&i32RX_int, &ui32RX_frac, state.roll);
-    float_to_ints(&i32RY_int, &ui32RY_frac, state.pitch);
-    float_to_ints(&i32RZ_int, &ui32RZ_frac, state.yaw);
+    sprintf(strX, "%.4f", state.x);
+    sprintf(strY, "%.4f", state.y);
+    sprintf(strZ, "%.4f", state.z);
+    sprintf(strRX, "%.4f", state.roll);
+    sprintf(strRY, "%.4f", state.pitch);
+    sprintf(strRZ, "%.4f", state.yaw);
 
-    UARTprintf("IMU: %d.%u %d.%u %d.%u %d.%u %d.%u %d.%u\n", i32X_int, ui32X_frac,
-    														i32Y_int, ui32Y_frac,
-															i32Z_int, ui32Z_frac,
-															i32RX_int, ui32RX_frac,
-															i32RY_int, ui32RY_frac,
-															i32RZ_int, ui32RZ_frac);
+    UARTprintf("IMU: %s %s %s %s %s %s\n", strX, strY, strZ,
+										   strRX, strRY, strRZ);
 }
 
