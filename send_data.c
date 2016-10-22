@@ -28,17 +28,17 @@ sendIMUData(void)
     IMUState state;
     getIMUState(&state);
 
-    char strX[16], strY[16], strZ[16];
-    char strRX[16], strRY[16], strRZ[16];
+    char strX[20], strY[20], strZ[20];
+    char strRX[16] = "0", strRY[16]="0", strRZ[16]="0";
 
-    sprintf(strX, "%.4f", state.x);
-    sprintf(strY, "%.4f", state.y);
-    sprintf(strZ, "%.4f", state.z);
-    sprintf(strRX, "%.4f", state.roll);
-    sprintf(strRY, "%.4f", state.pitch);
-    sprintf(strRZ, "%.4f", state.yaw);
+    snprintf(strX, 20, "%.16f", state.x);
+    snprintf(strY, 20, "%.16f", state.y);
+    snprintf(strZ, 20, "%.16f", state.z);
+    snprintf(strRX, 16, "%.8f", state.roll);
+    snprintf(strRY, 16, "%.8f", state.pitch);
+    snprintf(strRZ, 16, "%.8f", state.yaw);
 
-    UARTprintf("IMU: %s %s %s %s %s %s\n", strX, strY, strZ,
+    UARTprintf("(%s %s %s %s %s %s)", strX, strY, strZ,
 										   strRX, strRY, strRZ);
 }
 
