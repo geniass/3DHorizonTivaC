@@ -46,7 +46,11 @@
 #include "events.h"
 #include "motion.h"
 #include "filter/HeaveFilter.h"
+#include "filter/DecimateFilter.h"
 #include "MadgwickAHRS/MadgwickAHRS.h"
+#include "alias_data.h"
+
+extern double gaussrand();
 
 extern volatile uint32_t g_pui32RGBColors[3];
 
@@ -85,6 +89,9 @@ uint_fast8_t g_ui8MotionState;
 //*****************************************************************************
 volatile uint_fast8_t g_vui8ErrorFlag;
 
+uint32_t g_ui32DecimateCounter = 0;
+#define DECIMATE_SKIP_COUNT            4
+
 //*****************************************************************************
 //
 // Counter to keep tracj of initialization progress
@@ -109,10 +116,17 @@ uint32_t g_ui32AccelSampCount;
 
 float g_pfInAcceleration[3];
 float g_pfFiltAccel[3];
+float g_pfFiltGyro[3];
 
-HeaveFilter g_sHeaveFilter;
-HeaveFilter g_sAccelXFilter;
+HeaveFilter g_sAccelZFilter;
+DecimateFilter g_sAccelXFilter;
 HeaveFilter g_sAccelYFilter;
+
+HeaveFilter g_sGyroXFilter;
+HeaveFilter g_sGyroYFilter;
+HeaveFilter g_sGyroZFilter;
+
+uint32_t idx = 0;
 
 //*****************************************************************************
 //
@@ -346,8 +360,8 @@ void
 MotionInit(void)
 {
 	// Turn on RED LED to indicate init has begun
-	g_pui32RGBColors[RED] = 0xFFFF;
-	RGBColorSet(g_pui32RGBColors);
+//	g_pui32RGBColors[RED] = 0xFFFF;
+//	RGBColorSet(g_pui32RGBColors);
 
     //
     // Enable port B used for motion interrupt.
@@ -423,7 +437,7 @@ MotionInit(void)
     //
 	// Configure the sampling rate to 1000 Hz / (1+24) = 40 Hz.
 	//
-	g_sMPU9150Inst.pui8Data[0] = 19;
+	g_sMPU9150Inst.pui8Data[0] = 0;
 	MPU9150Write(&g_sMPU9150Inst, MPU9150_O_SMPLRT_DIV, g_sMPU9150Inst.pui8Data,
 			1, MotionCallback, &g_sMPU9150Inst);
 	MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
@@ -456,15 +470,19 @@ MotionInit(void)
 	MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
 	UARTprintf("DLPF: %d\n", g_sMPU9150Inst.pui8Data[0]);
 
-	HeaveFilter_init(&g_sHeaveFilter);
-	HeaveFilter_init(&g_sAccelXFilter);
+	HeaveFilter_init(&g_sAccelZFilter);
+	DecimateFilter_init(&g_sAccelXFilter);
 	HeaveFilter_init(&g_sAccelYFilter);
+
+	HeaveFilter_init(&g_sGyroXFilter);
+	HeaveFilter_init(&g_sGyroYFilter);
+	HeaveFilter_init(&g_sGyroZFilter);
 
 	MadgwickInit((float) MOTION_SAMPLE_FREQ_HZ, MADGWICK_BETA_INIT);
 
     // Init is now done
-    g_pui32RGBColors[RED] = 0x0;
-    RGBColorSet(g_pui32RGBColors);
+//    g_pui32RGBColors[RED] = 0x0;
+//    RGBColorSet(g_pui32RGBColors);
 }
 
 //*****************************************************************************
@@ -486,21 +504,43 @@ MotionMain(void)
 	MPU9150DataGyroGetFloat(&g_sMPU9150Inst, g_pfGyro,
 							g_pfGyro + 1, g_pfGyro + 2);
 
+
+	// g_pfAccel[0] = 10000.f * g_pfAccel[0];
+	// g_pfAccel[0] = 100.f*gaussrand();
+	//g_pfAccel[0] = data[idx++];
+	if (idx >= 2049) {
+		idx = 0;
+	}
+
+
+
 	// Filter the heave acceleration. Maybe move outside interrupt
-	HeaveFilter_put(&g_sHeaveFilter, g_pfAccel[2]);
-	g_pfFiltAccel[2] = HeaveFilter_get(&g_sHeaveFilter);
-
-	HeaveFilter_put(&g_sAccelXFilter, g_pfAccel[0]);
-	g_pfFiltAccel[0] = HeaveFilter_get(&g_sAccelXFilter);
-
+	DecimateFilter_put(&g_sAccelXFilter, g_pfAccel[0]);
 	HeaveFilter_put(&g_sAccelYFilter, g_pfAccel[1]);
-	g_pfFiltAccel[1] = HeaveFilter_get(&g_sAccelYFilter);
+	HeaveFilter_put(&g_sAccelZFilter, g_pfAccel[2]);
+
+	HeaveFilter_put(&g_sGyroXFilter, g_pfGyro[0]);
+	HeaveFilter_put(&g_sGyroYFilter, g_pfGyro[1]);
+	HeaveFilter_put(&g_sGyroZFilter, g_pfGyro[2]);
 
 	//
 	// Subtract the offsets computed during calibration
 	//
 	VectorSubtract(g_pfGyro, g_pfGyro, g_pfGyroOffsets);
-	VectorSubtract(g_pfAccel, g_pfAccel, g_pfAccelOffsets);
+//	VectorSubtract(g_pfAccel, g_pfAccel, g_pfAccelOffsets);
+
+	if (++g_ui32DecimateCounter < DECIMATE_SKIP_COUNT) {
+		return;
+	}
+	g_ui32DecimateCounter = 0;
+
+	g_pfFiltAccel[0] = DecimateFilter_get(&g_sAccelXFilter);
+	g_pfFiltAccel[1] = HeaveFilter_get(&g_sAccelYFilter);
+	g_pfFiltAccel[2] = HeaveFilter_get(&g_sAccelZFilter);
+
+	g_pfFiltGyro[0] = HeaveFilter_get(&g_sGyroXFilter);
+	g_pfFiltGyro[1] = HeaveFilter_get(&g_sGyroYFilter);
+	g_pfFiltGyro[2] = HeaveFilter_get(&g_sGyroZFilter);
 
     switch(g_ui8MotionState)
     {
@@ -517,7 +557,8 @@ MotionMain(void)
             // Magnetometer data is ready and present. This may not be the case
             // for the first few data captures.
             //
-            if(g_sMPU9150Inst.pui8Data[14] & AK8975_ST1_DRDY)
+			if(1)
+           // if(g_sMPU9150Inst.pui8Data[14] & AK8975_ST1_DRDY)
             {
                 //
                 // Proceed to the run state after a certain number of samples
@@ -535,10 +576,13 @@ MotionMain(void)
 				}
             }
 
-            MadgwickAHRSupdate(g_pfGyro[0], g_pfGyro[1], g_pfGyro[2],
+			/*
+            MadgwickAHRSupdate(g_pfFiltGyro[0], g_pfFiltGyro[1], g_pfFiltGyro[2],
             					g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2],
 								g_pfMag[0], g_pfMag[1], g_pfMag[2]);
-
+			*/
+			MadgwickAHRSupdateIMU(g_pfFiltGyro[0], g_pfFiltGyro[1], g_pfFiltGyro[2],
+									g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2]);
             break;
         }
 
@@ -564,9 +608,14 @@ MotionMain(void)
             //
             // Update the filter
             //
+        	/*
             MadgwickAHRSupdate(g_pfGyro[0], g_pfGyro[1], g_pfGyro[2],
             					g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2],
 								g_pfMag[0], g_pfMag[1], g_pfMag[2]);
+			*/
+
+            MadgwickAHRSupdateIMU(g_pfFiltGyro[0], g_pfFiltGyro[1], g_pfFiltGyro[2],
+									g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2]);
 
             break;
         }
@@ -584,6 +633,8 @@ MotionMain(void)
             break;
         }
     }
+
+    HWREGBITW(&g_ui32Events, USB_TICK_EVENT) = 1;
 }
 
 void
@@ -622,7 +673,7 @@ getIMUState(IMUState* state)
 {
 	MadgwickAHRSGetEulers(&state->pitch, &state->roll, &state->yaw);
 
-    state->x = g_pfFiltAccel[1];
-    state->y = g_pfAccel[1];
+    state->x = g_pfFiltAccel[0];
+    state->y = g_pfAccel[0];
     state->z = g_pfFiltAccel[2];
 }

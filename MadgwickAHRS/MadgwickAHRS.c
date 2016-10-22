@@ -134,6 +134,7 @@ void MadgwickAHRSupdate(float gx, float gy, float gz, float ax, float ay, float 
 		qDot2 -= beta * s1;
 		qDot3 -= beta * s2;
 		qDot4 -= beta * s3;
+
 	}
 
 	// Integrate rate of change of quaternion to yield quaternion

@@ -48,10 +48,10 @@ extern "C"
 // Define MPU9150 data sampling frequency.
 //
 //*****************************************************************************
-#define MOTION_SAMPLE_FREQ_HZ   50
+#define MOTION_SAMPLE_FREQ_HZ   250
 
-#define MADGWICK_BETA_INIT		1.f
-#define MADGWICK_BETA_STEADY	0.1f
+#define MADGWICK_BETA_INIT		2.5f
+#define MADGWICK_BETA_STEADY	0.2f
 
 //*****************************************************************************
 //

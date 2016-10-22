@@ -133,7 +133,7 @@ ConfigureUART(void)
     //
     // Initialize the UART for console I/O.
     //
-    UARTStdioConfig(0, 115200, 16000000);
+    UARTStdioConfig(0, 1000000, 16000000);
 }
 
 //*****************************************************************************
@@ -152,7 +152,7 @@ main(void)
     //
     // Set the clocking to run from the PLL at 40MHz.
     //
-    ROM_SysCtlClockSet(SYSCTL_SYSDIV_1 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN |
+    ROM_SysCtlClockSet(SYSCTL_SYSDIV_2_5 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN |
                        SYSCTL_XTAL_16MHZ);
 
     //
@@ -199,26 +199,16 @@ main(void)
     //
     MotionInit();
 
+    g_pui32RGBColors[RED] = 0;
+	g_pui32RGBColors[BLUE] = 0;
+	g_pui32RGBColors[GREEN] = 0xFFFF;
+	RGBColorSet(g_pui32RGBColors);
 
     //
     // Drop into the main loop.
     //
     while(1)
     {
-        //
-        // Send latest state info to host on timer tick
-        //
-        if(HWREGBITW(&g_ui32Events, USB_TICK_EVENT) == 1)
-        {
-            //
-            // Clear the Tick event flag. Set in SysTick interrupt handler.
-            //
-            HWREGBITW(&g_ui32Events, USB_TICK_EVENT) = 0;
-
-//			sendIMUData();
-        }
-
-
         //
         // Check for and handle motion events.
         //
@@ -235,7 +225,19 @@ main(void)
             // Process the motion data that has been captured
             //
             MotionMain();
-            sendIMUData();
+        }
+
+        //
+        // Send latest state info to host on timer tick
+        //
+        if(HWREGBITW(&g_ui32Events, USB_TICK_EVENT) == 1)
+        {
+            //
+            // Clear the Tick event flag. Set in SysTick interrupt handler.
+            //
+            HWREGBITW(&g_ui32Events, USB_TICK_EVENT) = 0;
+
+			sendIMUData();
         }
 
         //
