@@ -95,8 +95,6 @@ __error__(char *pcFilename, uint32_t ui32Line)
 void
 SysTickIntHandler(void)
 {
-    HWREGBITW(&g_ui32Events, USB_TICK_EVENT) = 1;
-
     g_ui32SysTickCount++;
 }
 
