@@ -50,17 +50,8 @@ extern "C"
 //*****************************************************************************
 #define MOTION_SAMPLE_FREQ_HZ   250
 
-#define MADGWICK_BETA_INIT		2.5f
-#define MADGWICK_BETA_STEADY	0.2f
-
-//*****************************************************************************
-//
-// Weights the DCM should use for each sensor.  Must add to 1.0
-//
-//*****************************************************************************
-#define DCM_MAG_WEIGHT          0.2f
-#define DCM_GYRO_WEIGHT         0.6f
-#define DCM_ACCEL_WEIGHT        0.2f
+#define MAHONY_KP		0.5f
+#define MAHONY_KI		0.0f
 
 //*****************************************************************************
 //

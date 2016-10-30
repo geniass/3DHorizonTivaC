@@ -1,6 +1,8 @@
 eclipse.preferences.version=1
 encoding//Debug/MadgwickAHRS/subdir_rules.mk=UTF-8
 encoding//Debug/MadgwickAHRS/subdir_vars.mk=UTF-8
+encoding//Debug/MahonyAHRS/subdir_rules.mk=UTF-8
+encoding//Debug/MahonyAHRS/subdir_vars.mk=UTF-8
 encoding//Debug/drivers/subdir_rules.mk=UTF-8
 encoding//Debug/drivers/subdir_vars.mk=UTF-8
 encoding//Debug/filter/subdir_rules.mk=UTF-8
