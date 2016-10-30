@@ -47,7 +47,7 @@
 #include "motion.h"
 #include "filter/HeaveFilter.h"
 #include "filter/DecimateFilter.h"
-#include "MadgwickAHRS/MadgwickAHRS.h"
+#include "MahonyAHRS/MahonyAHRS.h"
 #include "alias_data.h"
 
 extern double gaussrand();
@@ -145,41 +145,6 @@ MotionI2CIntHandler(void)
     I2CMIntHandler(&g_sI2CInst);
 }
 
-//*****************************************************************************
-//
-// Computes the product of a matrix and vector.
-//
-//*****************************************************************************
-static void
-MatrixVectorMul(float pfVectorOut[3], float ppfMatrixIn[3][3],
-                float pfVectorIn[3])
-{
-    uint32_t ui32X, ui32Y;
-
-    //
-    // Loop through the rows of the matrix.
-    //
-    for(ui32Y = 0; ui32Y < 3; ui32Y++)
-    {
-        //
-        // Initialize the value to zero
-        //
-        pfVectorOut[ui32Y] = 0;
-
-        //
-        // Loop through the columns of the matrix.
-        //
-        for(ui32X = 0; ui32X < 3; ui32X++)
-        {
-            //
-            // The answer to this vector's row's value is the sum of each
-            // column value multiplied by each vector's row value.
-            //
-            pfVectorOut[ui32Y] += (ppfMatrixIn[ui32Y][ui32X] *
-                                   pfVectorIn[ui32X]);
-        }
-    }
-}
 
 //*****************************************************************************
 //
@@ -445,7 +410,7 @@ MotionInit(void)
     //
     // Write application specific sensor configuration such as filter settings
     // and sensor range settings.
-    g_sMPU9150Inst.pui8Data[0] = MPU9150_CONFIG_DLPF_CFG_5_5;
+    g_sMPU9150Inst.pui8Data[0] = MPU9150_CONFIG_DLPF_CFG_21_20;
     g_sMPU9150Inst.pui8Data[1] = MPU9150_GYRO_CONFIG_FS_SEL_250;
     g_sMPU9150Inst.pui8Data[2] = (MPU9150_ACCEL_CONFIG_ACCEL_HPF_RESET |
                                   MPU9150_ACCEL_CONFIG_AFS_SEL_2G);
@@ -464,12 +429,6 @@ MotionInit(void)
                  g_sMPU9150Inst.pui8Data, 2, MotionCallback, &g_sMPU9150Inst);
     MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
 
-	g_sMPU9150Inst.pui8Data[0] = 0;
-	MPU9150Read(&g_sMPU9150Inst, MPU9150_O_CONFIG, g_sMPU9150Inst.pui8Data, 1,
-			MotionCallback, &g_sMPU9150Inst);
-	MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
-	UARTprintf("DLPF: %d\n", g_sMPU9150Inst.pui8Data[0]);
-
 	HeaveFilter_init(&g_sAccelZFilter);
 	DecimateFilter_init(&g_sAccelXFilter);
 	HeaveFilter_init(&g_sAccelYFilter);
@@ -478,7 +437,7 @@ MotionInit(void)
 	HeaveFilter_init(&g_sGyroYFilter);
 	HeaveFilter_init(&g_sGyroZFilter);
 
-	MadgwickInit((float) MOTION_SAMPLE_FREQ_HZ, MADGWICK_BETA_INIT);
+	MahonyInit((float) MOTION_SAMPLE_FREQ_HZ, MAHONY_KP, MAHONY_KI);
 
     // Init is now done
 //    g_pui32RGBColors[RED] = 0x0;
@@ -505,6 +464,7 @@ MotionMain(void)
 							g_pfGyro + 1, g_pfGyro + 2);
 
 
+	// for testing the filters
 	// g_pfAccel[0] = 10000.f * g_pfAccel[0];
 	// g_pfAccel[0] = 100.f*gaussrand();
 	//g_pfAccel[0] = data[idx++];
@@ -557,32 +517,18 @@ MotionMain(void)
             // Magnetometer data is ready and present. This may not be the case
             // for the first few data captures.
             //
+			// We don't actually care about the magnetometer
 			if(1)
            // if(g_sMPU9150Inst.pui8Data[14] & AK8975_ST1_DRDY)
             {
-                //
-                // Proceed to the run state after a certain number of samples
-            	// with high beta gain to ensure convergence
-                //
-            	if (++g_ui32CalibrationCounter < 1000) {
-					// high gain for initial convergence
-					MadgwickSetGain(MADGWICK_BETA_INIT);
-				} else {
-					MadgwickSetGain(MADGWICK_BETA_STEADY);
-					g_ui8MotionState = MOTION_STATE_RUN;
+				g_ui8MotionState = MOTION_STATE_RUN;
 
-					g_pui32RGBColors[BLUE] = 0x0;
-					RGBColorSet(g_pui32RGBColors);
-				}
+				g_pui32RGBColors[BLUE] = 0x0;
+				RGBColorSet(g_pui32RGBColors);
             }
 
-			/*
-            MadgwickAHRSupdate(g_pfFiltGyro[0], g_pfFiltGyro[1], g_pfFiltGyro[2],
-            					g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2],
-								g_pfMag[0], g_pfMag[1], g_pfMag[2]);
-			*/
-			MadgwickAHRSupdateIMU(g_pfFiltGyro[0], g_pfFiltGyro[1], g_pfFiltGyro[2],
-									g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2]);
+			MahonyAHRSupdateIMU(g_pfFiltGyro[0], g_pfFiltGyro[1], g_pfFiltGyro[2],
+								g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2]);
             break;
         }
 
@@ -608,14 +554,8 @@ MotionMain(void)
             //
             // Update the filter
             //
-        	/*
-            MadgwickAHRSupdate(g_pfGyro[0], g_pfGyro[1], g_pfGyro[2],
-            					g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2],
-								g_pfMag[0], g_pfMag[1], g_pfMag[2]);
-			*/
-
-            MadgwickAHRSupdateIMU(g_pfFiltGyro[0], g_pfFiltGyro[1], g_pfFiltGyro[2],
-									g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2]);
+            MahonyAHRSupdateIMU(g_pfFiltGyro[0], g_pfFiltGyro[1], g_pfFiltGyro[2],
+								g_pfFiltAccel[0], g_pfFiltAccel[1], g_pfFiltAccel[2]);
 
             break;
         }
@@ -651,7 +591,7 @@ startCalibration(void)
 	g_pfAccelOffsets[1] = 0.f;
 	g_pfAccelOffsets[2] = 0.f;
 
-	MadgwickInit((float) MOTION_SAMPLE_FREQ_HZ, MADGWICK_BETA_INIT);
+	MahonyInit((float) MOTION_SAMPLE_FREQ_HZ, MAHONY_KP, MAHONY_KI);
 }
 
 void
@@ -664,16 +604,14 @@ stopCalibration(void)
 	//
 	VectorScale(g_pfGyroOffsets, g_pfGyroOffsets, (1.f / (float) g_ui32GyroSampCount));
 	VectorScale(g_pfAccelOffsets, g_pfAccelOffsets, (1.f / (float) g_ui32AccelSampCount));
-
-	MadgwickSetGain(MADGWICK_BETA_STEADY);
 }
 
 void
 getIMUState(IMUState* state)
 {
-	MadgwickAHRSGetEulers(&state->pitch, &state->roll, &state->yaw);
+	MahonyAHRSGetEulers(&state->pitch, &state->roll, &state->yaw);
 
     state->x = g_pfFiltAccel[0];
-    state->y = g_pfAccel[0];
+    state->y = g_pfFiltAccel[1];
     state->z = g_pfFiltAccel[2];
 }
