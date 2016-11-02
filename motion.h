@@ -50,8 +50,8 @@ extern "C"
 //*****************************************************************************
 #define MOTION_SAMPLE_FREQ_HZ   250
 
-#define MAHONY_KP		0.5f
-#define MAHONY_KI		0.0f
+#define MAHONY_KP		1.f
+#define MAHONY_KI		0.1f
 
 //*****************************************************************************
 //

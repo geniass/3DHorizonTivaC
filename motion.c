@@ -46,7 +46,7 @@
 #include "events.h"
 #include "motion.h"
 #include "filter/HeaveFilter.h"
-#include "filter/DecimateFilter.h"
+#include "filter/HeaveFilter.h"
 #include "MahonyAHRS/MahonyAHRS.h"
 #include "alias_data.h"
 
@@ -119,7 +119,7 @@ float g_pfFiltAccel[3];
 float g_pfFiltGyro[3];
 
 HeaveFilter g_sAccelZFilter;
-DecimateFilter g_sAccelXFilter;
+HeaveFilter g_sAccelXFilter;
 HeaveFilter g_sAccelYFilter;
 
 HeaveFilter g_sGyroXFilter;
@@ -430,7 +430,7 @@ MotionInit(void)
     MotionI2CWait(MOTION_EVENT, __FILE__, __LINE__);
 
 	HeaveFilter_init(&g_sAccelZFilter);
-	DecimateFilter_init(&g_sAccelXFilter);
+	HeaveFilter_init(&g_sAccelXFilter);
 	HeaveFilter_init(&g_sAccelYFilter);
 
 	HeaveFilter_init(&g_sGyroXFilter);
@@ -475,7 +475,7 @@ MotionMain(void)
 
 
 	// Filter the heave acceleration. Maybe move outside interrupt
-	DecimateFilter_put(&g_sAccelXFilter, g_pfAccel[0]);
+	HeaveFilter_put(&g_sAccelXFilter, g_pfAccel[0]);
 	HeaveFilter_put(&g_sAccelYFilter, g_pfAccel[1]);
 	HeaveFilter_put(&g_sAccelZFilter, g_pfAccel[2]);
 
@@ -494,7 +494,7 @@ MotionMain(void)
 	}
 	g_ui32DecimateCounter = 0;
 
-	g_pfFiltAccel[0] = DecimateFilter_get(&g_sAccelXFilter);
+	g_pfFiltAccel[0] = HeaveFilter_get(&g_sAccelXFilter);
 	g_pfFiltAccel[1] = HeaveFilter_get(&g_sAccelYFilter);
 	g_pfFiltAccel[2] = HeaveFilter_get(&g_sAccelZFilter);
 
