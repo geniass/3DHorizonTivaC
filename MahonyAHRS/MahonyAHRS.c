@@ -248,6 +248,14 @@ void MahonyAHRSGetEulers(float* roll, float* pitch, float* yaw)
 	*yaw = atan2f(t1, t0) * RAD2DEG;
 }
 
+void MahonyAHRSGetQuaternion(float q[4])
+{
+	q[0] = q0;
+	q[1] = q1;
+	q[2] = q2;
+	q[3] = q3;
+}
+
 //---------------------------------------------------------------------------------------------------
 // Fast inverse square-root
 // See: http://en.wikipedia.org/wiki/Fast_inverse_square_root

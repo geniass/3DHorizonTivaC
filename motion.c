@@ -611,7 +611,13 @@ getIMUState(IMUState* state)
 {
 	MahonyAHRSGetEulers(&state->pitch, &state->roll, &state->yaw);
 
-    state->x = g_pfFiltAccel[0];
-    state->y = g_pfFiltAccel[1];
-    state->z = g_pfFiltAccel[2];
+	// Transform the measured acceleration from the sensor frame to the world frame
+	float q[4];
+	float acc[3] = {0.f, 0.f, 0.};
+	MahonyAHRSGetQuaternion(q);
+	VectorRotateQuaternion(acc, g_pfFiltAccel, q);
+
+    state->x = acc[0];
+    state->y = acc[1];
+    state->z = acc[2];
 }
