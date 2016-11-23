@@ -463,6 +463,9 @@ MotionMain(void)
 	MPU9150DataGyroGetFloat(&g_sMPU9150Inst, g_pfGyro,
 							g_pfGyro + 1, g_pfGyro + 2);
 
+	// MPU reports downward acceleration as positive
+	g_pfAccel[2] = -g_pfAccel[2];
+
 
 	// for testing the filters
 	// g_pfAccel[0] = 10000.f * g_pfAccel[0];
